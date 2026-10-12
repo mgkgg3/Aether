@@ -1,0 +1,17 @@
+#include <windows.h>
+
+#define AETHER_FONT_BODY         2001
+#define AETHER_FONT_MEDIUM       2002
+#define AETHER_FONT_ICONS        2003
+#define AETHER_FONT_NAV          2004
+#define AETHER_FONT_INTER        2005
+#define AETHER_FONT_INTER_MEDIUM 2006
+#define AETHER_FONT_INTER_SEMI   2007
+
+AETHER_FONT_BODY         RCDATA "fonts\\Geist-Regular.ttf"
+AETHER_FONT_MEDIUM       RCDATA "fonts\\Geist-SemiBold.ttf"
+AETHER_FONT_ICONS        RCDATA "fonts\\FontAwesome-Solid.ttf"
+AETHER_FONT_NAV          RCDATA "fonts\\nav.ttf"
+AETHER_FONT_INTER        RCDATA "fonts\\Inter-Regular.ttf"
+AETHER_FONT_INTER_MEDIUM RCDATA "fonts\\Inter-Medium.ttf"
+AETHER_FONT_INTER_SEMI   RCDATA "fonts\\Inter-SemiBold.ttf"

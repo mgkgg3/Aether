@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Aether", "Aether.vcxproj", "{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}.Debug|x86.ActiveCfg = Debug|Win32
+		{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}.Debug|x86.Build.0 = Debug|Win32
+		{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}.Release|x86.ActiveCfg = Release|Win32
+		{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}.Release|x86.Build.0 = Release|Win32
+		{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}.Debug|x64.ActiveCfg = Debug|x64
+		{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}.Debug|x64.Build.0 = Debug|x64
+		{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}.Release|x64.ActiveCfg = Release|x64
+		{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3E9D6B14-58C2-4F07-9A31-C8D05E7B21A6}
+	EndGlobalSection
+EndGlobal

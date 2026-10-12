@@ -1,0 +1,17 @@
+
+#ifndef BOOST_CONFIG_CMATH
+#  define BOOST_CONFIG_CMATH
+
+#  ifndef BOOST_TR1_NO_RECURSION
+#     define BOOST_TR1_NO_RECURSION
+#     define BOOST_CONFIG_NO_CMATH_RECURSION
+#  endif
+
+#  include <cmath>
+
+#  ifdef BOOST_CONFIG_NO_CMATH_RECURSION
+#     undef BOOST_TR1_NO_RECURSION
+#     undef BOOST_CONFIG_NO_CMATH_RECURSION
+#  endif
+
+#endif

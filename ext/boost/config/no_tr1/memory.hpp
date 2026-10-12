@@ -1,0 +1,17 @@
+
+#ifndef BOOST_CONFIG_MEMORY
+#  define BOOST_CONFIG_MEMORY
+
+#  ifndef BOOST_TR1_NO_RECURSION
+#     define BOOST_TR1_NO_RECURSION
+#     define BOOST_CONFIG_NO_MEMORY_RECURSION
+#  endif
+
+#  include <memory>
+
+#  ifdef BOOST_CONFIG_NO_MEMORY_RECURSION
+#     undef BOOST_TR1_NO_RECURSION
+#     undef BOOST_CONFIG_NO_MEMORY_RECURSION
+#  endif
+
+#endif

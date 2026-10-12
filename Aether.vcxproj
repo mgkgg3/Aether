@@ -1,0 +1,300 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{7A1C4F52-93B8-4E6D-A0D7-2C5E81F4B930}</ProjectGuid>
+    <RootNamespace>Aether</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.props" />
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)build\</OutDir>
+    <IntDir>$(SolutionDir)artifacts\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)build\</OutDir>
+    <IntDir>$(SolutionDir)artifacts\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;AETHER_ANIM=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <LanguageStandard_C>stdclatest</LanguageStandard_C>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)ext;$(ProjectDir)ext\imgui;$(ProjectDir)ext\imgui\backends;$(ProjectDir)thirdparty\FreeType\include;$(ProjectDir)thirdparty\Microsoft DirectX SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <AdditionalDependencies>d3d11.lib;d3dx11.lib;freetype.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)thirdparty\FreeType\lib\x64;$(ProjectDir)thirdparty\Microsoft DirectX SDK\Lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;AETHER_ANIM=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <LanguageStandard_C>stdclatest</LanguageStandard_C>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)ext;$(ProjectDir)ext\imgui;$(ProjectDir)ext\imgui\backends;$(ProjectDir)thirdparty\FreeType\include;$(ProjectDir)thirdparty\Microsoft DirectX SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <AdditionalDependencies>d3d11.lib;d3dx11.lib;freetype.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)thirdparty\FreeType\lib\x64;$(ProjectDir)thirdparty\Microsoft DirectX SDK\Lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="ext\imgui\imgui.cpp" />
+    <ClCompile Include="ext\imgui\imgui_demo.cpp" />
+    <ClCompile Include="ext\imgui\imgui_draw.cpp" />
+    <ClCompile Include="ext\imgui\imgui_tables.cpp" />
+    <ClCompile Include="ext\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="ext\imgui\backends\imgui_impl_dx11.cpp" />
+    <ClCompile Include="ext\imgui\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="ext\imgui\addons\imgui_addons.cpp" />
+    <ClCompile Include="ext\imgui\misc\freetype\imgui_freetype.cpp" />
+    <ClCompile Include="ext\im_anim\im_anim.cpp" />
+    <ClCompile Include="src\cache\cache.cpp" />
+    <ClCompile Include="src\render\Backdrop.cpp" />
+    <ClCompile Include="src\game\rescan\rescan.cpp" />
+    <ClCompile Include="src\game\game_context.cpp" />
+    <ClCompile Include="src\game\game_structure.cpp" />
+    <ClCompile Include="src\features\spotify\Spotify.cpp" />
+    <ClCompile Include="src\features\aimbot\aimbot.cpp" />
+    <ClCompile Include="src\features\silentaim\silentaim.cpp" />
+    <ClCompile Include="src\features\rage\rapidfire.cpp" />
+    <ClCompile Include="src\features\rage\spin360.cpp" />
+    <ClCompile Include="src\features\rage\triggerbot.cpp" />
+    <ClCompile Include="src\features\movement\fly.cpp" />
+    <ClCompile Include="src\features\movement\speed.cpp" />
+    <ClCompile Include="src\features\movement\tickrate.cpp" />
+    <ClCompile Include="src\features\movement\noclip.cpp" />
+    <ClCompile Include="src\features\movement\jumpcooldown.cpp" />
+    <ClCompile Include="src\features\misc\exploits.cpp" />
+    <ClCompile Include="src\features\misc\SkyShader.cpp" />
+    <ClCompile Include="src\features\effects\Effects.cpp" />
+    <ClCompile Include="src\features\esp\trails\Trails.cpp" />
+    <ClCompile Include="src\features\misc\Sonar.cpp" />
+    <ClCompile Include="src\features\misc\HitSounds.cpp" />
+    <ClCompile Include="src\features\misc\hitsounds_data.cpp" />
+    <ClCompile Include="src\features\misc\SkyVideo.cpp" />
+    <ClCompile Include="src\features\world\world_effects.cpp" />
+    <ClCompile Include="src\features\esp\esp.cpp" />
+    <ClCompile Include="src\features\esp\Avatar.cpp" />
+    <ClCompile Include="src\features\esp\BoxFill.cpp" />
+    <ClCompile Include="src\features\chams\EngineChams.cpp" />
+    <ClCompile Include="src\features\chams\ShaderChams.cpp" />
+    <ClCompile Include="src\features\chams\ShaderChamsModes.cpp" />
+    <ClCompile Include="src\features\chams\ShaderChamsFill.cpp" />
+    <ClCompile Include="src\features\chams\ShaderChamsOutline.cpp" />
+    <ClCompile Include="src\features\hitbox_expander\hitbox_expander.cpp" />
+    <ClCompile Include="src\features\raycast\RaycastEngine.cpp" />
+    <ClCompile Include="src\features\raycast\RaycastSilent.cpp" />
+    <ClCompile Include="src\features\worldgeo\WorldGeo.cpp" />
+    <ClCompile Include="src\features\opone\OperationOne.cpp" />
+    <ClCompile Include="src\features\mesh\MeshCache.cpp" />
+    <ClCompile Include="src\features\mesh\MeshParser.cpp" />
+    <ClCompile Include="src\features\mesh\MeshChams.cpp" />
+    <ClCompile Include="src\features\mesh\MeshDxShader.cpp" />
+    <ClCompile Include="src\features\radar\Radar.cpp" />
+    <ClCompile Include="src\features\walkspeed\walkspeed.cpp" />
+    <ClCompile Include="src\features\rage\rage.cpp" />
+    <ClCompile Include="src\gui\CGui.cpp" />
+    <ClCompile Include="src\gui\CTextEditor.cpp" />
+    <ClCompile Include="src\gui\CTextures.cpp" />
+    <ClCompile Include="src\gui\LanguageDefinitions.cpp" />
+    <ClCompile Include="src\keybind\keybind.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\memory\memory.cpp" />
+    <ClCompile Include="src\render\render.cpp" />
+    <ClCompile Include="src\sdk\sdk.cpp" />
+    <ClCompile Include="src\gui\explorer\AetherExplorer.cpp" />
+    <ClCompile Include="src\gui\menu\SyncMenu.cpp" />
+    <ClCompile Include="src\gui\explorer\AetherIcons.cpp" />
+    <ClCompile Include="src\debug\DebugConsole.cpp" />
+    <ClCompile Include="thirdparty\stb\stb_image_impl.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <MASM Include="src\memory\luck.asm">
+      <FileType>Document</FileType>
+    </MASM>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\AetherFonts.rc" />
+    <ResourceCompile Include="resources\hitsounds\hitsounds.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ext\imgui\imconfig.h" />
+    <ClInclude Include="ext\imgui\imgui.h" />
+    <ClInclude Include="ext\imgui\imgui_internal.h" />
+    <ClInclude Include="ext\imgui\imstb_rectpack.h" />
+    <ClInclude Include="ext\imgui\imstb_textedit.h" />
+    <ClInclude Include="ext\imgui\imstb_truetype.h" />
+    <ClInclude Include="ext\imgui\backends\imgui_impl_dx11.h" />
+    <ClInclude Include="ext\imgui\backends\imgui_impl_win32.h" />
+    <ClInclude Include="ext\imgui\addons\imgui_addons.h" />
+    <ClInclude Include="ext\imgui\misc\freetype\imgui_freetype.h" />
+    <ClInclude Include="ext\im_anim\im_anim.h" />
+    <ClInclude Include="src\gui\menu\Anim.h" />
+    <ClInclude Include="src\gui\menu\AimViz.h" />
+    <ClInclude Include="src\gui\menu\Docks.h" />
+    <ClInclude Include="src\gui\menu\HomePage.h" />
+    <ClInclude Include="src\features\aimbot\Telemetry.h" />
+    <ClInclude Include="src\cache\cache.h" />
+    <ClInclude Include="src\game\rescan\rescan.h" />
+    <ClInclude Include="src\features\aimbot\aimbot.h" />
+    <ClInclude Include="src\features\silentaim\silentaim.h" />
+    <ClInclude Include="src\features\rage\rapidfire.h" />
+    <ClInclude Include="src\features\rage\spin360.h" />
+    <ClInclude Include="src\features\rage\triggerbot.h" />
+    <ClInclude Include="src\features\movement\fly.h" />
+    <ClInclude Include="src\features\movement\speed.h" />
+    <ClInclude Include="src\features\movement\tickrate.h" />
+    <ClInclude Include="src\features\movement\noclip.h" />
+    <ClInclude Include="src\features\movement\jumpcooldown.h" />
+    <ClInclude Include="src\features\misc\exploits.h" />
+    <ClInclude Include="src\features\world\world_effects.h" />
+    <ClInclude Include="src\features\esp\esp.h" />
+    <ClInclude Include="src\features\hitbox_expander\hitbox_expander.h" />
+    <ClInclude Include="src\features\raycast\RaycastEngine.h" />
+    <ClInclude Include="src\features\worldgeo\WorldGeo.h" />
+    <ClInclude Include="src\features\opone\OperationOne.h" />
+    <ClInclude Include="src\features\raycast\RaycastSilent.h" />
+    <ClInclude Include="src\features\radar\Radar.h" />
+    <ClInclude Include="src\features\walkspeed\walkspeed.h" />
+    <ClInclude Include="src\features\rage\rage.h" />
+    <ClInclude Include="src\game\game.h" />
+    <ClInclude Include="src\game\game_context.h" />
+    <ClInclude Include="src\game\game_structure.h" />
+    <ClInclude Include="src\features\spotify\Spotify.h" />
+    <ClInclude Include="src\gui\CGui.h" />
+    <ClInclude Include="src\gui\CTextEditor.h" />
+    <ClInclude Include="src\gui\CTextures.h" />
+    <ClInclude Include="src\keybind\keybind.h" />
+    <ClInclude Include="src\memory\memory.h" />
+    <ClInclude Include="src\render\render.h" />
+    <ClInclude Include="src\render\Backdrop.h" />
+    <ClInclude Include="src\sdk\math\math.h" />
+    <ClInclude Include="src\sdk\offsets.h" />
+    <ClInclude Include="src\sdk\sdk.h" />
+    <ClInclude Include="src\gui\AetherWidgets.h" />
+    <ClInclude Include="src\gui\AetherIcons.h" />
+    <ClInclude Include="src\gui\AetherBackground.h" />
+    <ClInclude Include="src\gui\explorer\AetherExplorer.h" />
+    <ClInclude Include="src\gui\explorer\AetherIcons.h" />
+    <ClInclude Include="src\features\explorer\Explorer.h" />
+    <ClInclude Include="src\debug\DebugConsole.h" />
+    <ClInclude Include="src\settings.h" />
+    <ClInclude Include="src\features\misc\SkyShader.h" />
+    <ClInclude Include="src\features\misc\Sonar.h" />
+    <ClInclude Include="src\features\misc\UiFx.h" />
+    <ClInclude Include="src\features\misc\UiPack21.h" />
+    <ClInclude Include="src\features\misc\TextSheen.h" />
+    <ClInclude Include="src\features\esp\trails\Trails.h" />
+    <ClInclude Include="src\features\misc\SkyVideo.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
+  </ImportGroup>
+</Project>

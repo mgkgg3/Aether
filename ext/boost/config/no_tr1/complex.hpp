@@ -1,0 +1,17 @@
+
+#ifndef BOOST_CONFIG_COMPLEX
+#  define BOOST_CONFIG_COMPLEX
+
+#  ifndef BOOST_TR1_NO_RECURSION
+#     define BOOST_TR1_NO_RECURSION
+#     define BOOST_CONFIG_NO_COMPLEX_RECURSION
+#  endif
+
+#  include <complex>
+
+#  ifdef BOOST_CONFIG_NO_COMPLEX_RECURSION
+#     undef BOOST_TR1_NO_RECURSION
+#     undef BOOST_CONFIG_NO_COMPLEX_RECURSION
+#  endif
+
+#endif
