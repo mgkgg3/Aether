@@ -13,8 +13,8 @@ namespace aimbot
 	void run();
 	void draw_fov(ImDrawList* dl, const math::vector2& dims);
 
-
-
-
+	
+	
+	
 	void release_camera();
 }

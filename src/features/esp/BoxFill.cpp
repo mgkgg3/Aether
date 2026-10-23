@@ -126,6 +126,9 @@ namespace boxfill
 		g_device = device;
 		g_ok = true;
 
+		// Report the real result, so a path that no longer loads (moved file, a
+		// format stb cannot read) shows as failed in the menu instead of claiming
+		// to be ready from a stale config value.
 		settings::visuals::box_fill_image_loaded = false;
 		if (settings::visuals::box_fill_image_path[0])
 			settings::visuals::box_fill_image_loaded = load_path(settings::visuals::box_fill_image_path);

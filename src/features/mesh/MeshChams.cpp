@@ -523,6 +523,7 @@ namespace mesh
 			for (int c = 0; c < 4; ++c)
 				v.m[r][c] = view.m[r][c];
 
+		// The pass works in the game's client space; the overlay is the monitor.
 		dx::shader::SetOrigin(rbx::visualengine_t::window_offset_x(),
 		                      rbx::visualengine_t::window_offset_y());
 

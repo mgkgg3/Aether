@@ -134,6 +134,8 @@ namespace avatar
 			path.assign(path_part.begin(), path_part.end());
 		}
 
+		// A head shot and a bust are different thumbnails, so the cache key
+		// carries the kind alongside the user id.
 		long long thumb_key(long long user_id, bool head)
 		{
 			return user_id * 2 + (head ? 1 : 0);
@@ -344,6 +346,8 @@ namespace avatar
 		if (!view || max.x <= min.x || max.y <= min.y)
 			return false;
 
+				// the thumbnail is a 420x420 square, so fit it inside the rect instead of
+		// stretching it - a non-square rect used to squash the face
 		{
 			const float rw = max.x - min.x;
 			const float rh = max.y - min.y;

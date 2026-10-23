@@ -17,6 +17,8 @@ namespace mesh
 			void Shutdown();
 			void Resize(unsigned width, unsigned height);
 
+			// Top-left of the game's client rect inside the overlay, i.e. where the
+			// pass is allowed to draw. (0,0) for a fullscreen client.
 			void SetOrigin(float ox, float oy);
 
 			void BeginFrame(const Mesh::Matrix4x4& view, const Mesh::Vector3& camera, float time);

@@ -57,6 +57,9 @@ namespace game_ctx
 		if (pid_now)
 			place_id = pid_now;
 
+		// "In a place" needs the id to be readable right now, but a single failed
+		// read should not drop the client back to the home screen - so absence has
+		// to persist for a moment before the flag follows it.
 		static auto s_id_missing_at = std::chrono::steady_clock::time_point{};
 		if (pid_now)
 		{

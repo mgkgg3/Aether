@@ -5,6 +5,9 @@
 
 namespace raycast_silent
 {
+	// Redirects shots onto a target by swapping the direction the engine
+	// hands to WorldRoot::RaycastBound. Nothing is written to the camera, so
+	// the view never moves: only the bullet is bent.
 
 	bool install();
 	void remove();

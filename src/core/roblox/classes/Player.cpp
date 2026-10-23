@@ -11,7 +11,17 @@ std::string Cheat::Player::GetDisplayName() const
 		return "Unknown";
 	}
 
-	return g_Memory.ReadString(address + Offsets::Player::DisplayName);
+	// DisplayName is a pointer to the string, not the string itself - the same
+	// one-hop read every name in this tree does since the container moved.
+	// Handing this address straight to ReadString read the length field out of
+	// whatever happened to sit there and returned "Unknown".
+	const std::uint64_t text = g_Memory.Read<std::uint64_t>(address + Offsets::Player::DisplayName);
+	if (!text || text == ~0ull)
+	{
+		return "Unknown";
+	}
+
+	return g_Memory.ReadString(text);
 }
 
 std::int64_t Cheat::Player::GetUserId() const

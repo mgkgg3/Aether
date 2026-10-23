@@ -165,7 +165,7 @@ namespace Cheat {
 	{
 		WNDCLASSEXW wc = {
 			sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, instance,
-			nullptr, nullptr, nullptr, nullptr, L"aether.overlay", nullptr
+			nullptr, nullptr, nullptr, nullptr, L"jewsploit.overlay", nullptr
 		};
 		if (!RegisterClassExW(&wc))
 		{

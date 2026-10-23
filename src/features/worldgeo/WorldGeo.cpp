@@ -37,6 +37,11 @@ namespace
 
 		float r[9] = { 1.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 1.f };
 		float sx = 0.f, sy = 0.f, sz = 0.f;
+
+		// The primitive the box came from.  It is kept so a ray that reaches
+		// this box can ask where the part is *now* instead of trusting a
+		// snapshot that can be ten seconds old.
+		std::uint64_t prim = 0;
 	};
 
 	struct Snapshot
@@ -128,6 +133,7 @@ namespace
 						b.px = pos.x; b.py = pos.y; b.pz = pos.z;
 						for (int i = 0; i < 9; ++i) b.r[i] = rot.m[i];
 						b.sx = sz.x; b.sy = sz.y; b.sz = sz.z;
+						b.prim = prim.address;
 						out.push_back(b);
 					}
 				}
@@ -213,6 +219,87 @@ namespace
 		return tmin;
 	}
 
+	bool finite_matrix(const math::matrix3& m)
+	{
+		for (int i = 0; i < 9; ++i)
+			if (!std::isfinite(m.m[i]))
+				return false;
+		return true;
+	}
+
+	// Does this snapshot box stand in the way of the ray, *now*?
+	//
+	// The snapshot is rebuilt every ten seconds and the map is not frozen in
+	// between: doors slide shut, elevators move, crates get carried.  Only the
+	// boxes the ray actually reaches are re-read - a handful per ray - and the
+	// test is then made against the part's live position and rotation.  That is
+	// the difference between a vis check that tracks a moving map and one that
+	// reports walls that are no longer there.  A part that stopped colliding
+	// stops occluding for the same reason.
+	bool live_hit(const Box& b, float ox, float oy, float oz,
+	              float dx, float dy, float dz, float min_t, float limit_t, float& out)
+	{
+		// `limit_t` is the nearest blocker found so far: a box further away than
+		// that cannot change the answer, and skipping it here is what keeps the
+		// live read to the handful of boxes that matter.
+		const float snapshot_hit = ray_box_t(b, ox, oy, oz, dx, dy, dz, limit_t);
+		if (snapshot_hit <= min_t)
+			return false;
+
+		if (!b.prim)
+		{
+			out = snapshot_hit;
+			return true;
+		}
+
+		Box live = b;
+		try
+		{
+			const std::uint8_t flags = memory->read<std::uint8_t>(b.prim + Offsets::Primitive::Flags);
+			if (!(flags & Offsets::PrimitiveFlags::CanCollide))
+				return false;
+
+			const math::vector3 pos = memory->read<math::vector3>(b.prim + Offsets::Primitive::Position);
+			if (!math::finite(pos) || (pos.x == 0.f && pos.y == 0.f && pos.z == 0.f))
+			{
+				out = snapshot_hit;
+				return true;
+			}
+
+			live.px = pos.x; live.py = pos.y; live.pz = pos.z;
+
+			// A part that has not moved since the walk has not turned either, so
+			// the snapshot's rotation stands and a third read is skipped.  Most
+			// of the map is nailed down; only what actually moved pays for it.
+			const float moved = std::fabs(pos.x - b.px) + std::fabs(pos.y - b.py) +
+			                    std::fabs(pos.z - b.pz);
+			if (moved < 0.05f)
+			{
+				out = snapshot_hit;
+				return true;
+			}
+
+			const math::matrix3 rot = memory->read<math::matrix3>(b.prim + Offsets::Primitive::Rotation);
+			if (finite_matrix(rot))
+				for (int i = 0; i < 9; ++i) live.r[i] = rot.m[i];
+		}
+		catch (...)
+		{
+			out = snapshot_hit;
+			return true;
+		}
+
+		const float now_hit = ray_box_t(live, ox, oy, oz, dx, dy, dz, limit_t);
+		if (now_hit <= min_t)
+			return false;
+
+		out = now_hit;
+		return true;
+	}
+
+	// Distance to the first surface at or past min_t along a real direction, or
+	// max_t when the ray stays clear. Hits closer than min_t are ignored: those are
+	// the wall the camera is pressed against, which never counts as a blocker.
 	float march(const Snapshot& snap, float ox, float oy, float oz,
 	            float dx, float dy, float dz, float min_t, float max_t)
 	{
@@ -255,10 +342,9 @@ namespace
 				{
 					if (++tests > kMaxTests)
 						break;
-					const Box& b = snap.boxes[(std::size_t)idx];
-					const float hit = ray_box_t(b, ox, oy, oz, dx, dy, dz, max_t);
-
-					if (hit > min_t && hit < best)
+					float hit = 0.f;
+					if (live_hit(snap.boxes[(std::size_t)idx], ox, oy, oz, dx, dy, dz,
+					             min_t, best, hit) && hit < best)
 						best = hit;
 				}
 			}
@@ -279,6 +365,29 @@ namespace
 		}
 
 		return best;
+	}
+
+	// One line, one snapshot, answered without taking the mutex again.
+	bool visible_in(const Snapshot& snap, const math::vector3& cam, const math::vector3& target)
+	{
+		if (!math::finite(cam) || !math::finite(target))
+			return true;
+
+		float dx = target.x - cam.x;
+		float dy = target.y - cam.y;
+		float dz = target.z - cam.z;
+
+		const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+		if (dist < 1.f)
+			return true;
+
+		dx /= dist; dy /= dist; dz /= dist;
+
+		// Anything hit between the camera and the target blocks the view; the
+		// march stops a stud short of both ends, so a wall you are pressed
+		// against and the target's own surface do not count.
+		return march(snap, cam.x, cam.y, cam.z, dx, dy, dz, 1.f, dist - 1.f) >= dist - 1.f;
 	}
 
 	void run()
@@ -458,18 +567,71 @@ bool is_visible(const math::vector3& cam, const math::vector3& target)
 	if (!snap || snap->boxes.empty() || snap->grid.empty())
 		return true;
 
-	float dx = target.x - cam.x;
-	float dy = target.y - cam.y;
-	float dz = target.z - cam.z;
+	return visible_in(*snap, cam, target);
+}
 
-	const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-	if (dist < 1.f)
+bool is_visible_any(const math::vector3& cam, const math::vector3* points, int count)
+{
+	if (!points || count <= 0)
 		return true;
 
-	dx /= dist; dy /= dist; dz /= dist;
+	auto snap = get_snap();
 
-	return march(*snap, cam.x, cam.y, cam.z, dx, dy, dz, 1.f, dist - 1.f) >= dist - 1.f;
+	if (!snap || snap->boxes.empty() || snap->grid.empty())
+		return true;
+
+	for (int i = 0; i < count; ++i)
+	{
+		if (!math::finite(points[i]))
+			continue;
+		if (visible_in(*snap, cam, points[i]))
+			return true;
+	}
+
+	return false;
+}
+
+bool is_body_visible(const math::vector3& cam, const math::vector3& head, const math::vector3& root)
+{
+	if (!math::finite(cam) || !math::finite(head) || !math::finite(root))
+		return true;
+
+	auto snap = get_snap();
+
+	if (!snap || snap->boxes.empty() || snap->grid.empty())
+		return true;
+
+	const math::vector3 column = head - root;
+	const float         height = column.length();
+
+	// A crouched, flattened or broken body: one point is all there is to test.
+	if (height < 0.5f)
+		return visible_in(*snap, cam, head);
+
+	// The order a peek uncovers in, head first.  A body out in the open
+	// answers on the first ray, which is the common case and keeps this cheap.
+	if (visible_in(*snap, cam, head - column * 0.06f)) return true;  // head
+	if (visible_in(*snap, cam, head - column * 0.34f)) return true;  // chest
+	if (visible_in(*snap, cam, head - column * 0.70f)) return true;  // hips
+
+	// Either shoulder at chest height: a body leaning out from cover is an arm
+	// and nothing else, and the centre of it is still behind the wall.  The
+	// side has to be horizontal and across the view: the body column is
+	// vertical, so it has no side of its own to take.
+	const math::vector3 to_body{ head.x - cam.x, 0.f, head.z - cam.z };
+	const float         to_body_len = to_body.length();
+
+	math::vector3 side{ 1.f, 0.f, 0.f };
+	if (to_body_len > 1e-3f)
+		side = { -to_body.z / to_body_len, 0.f, to_body.x / to_body_len };
+
+	const math::vector3 shoulder = head - column * 0.30f;
+	const math::vector3 offset   = side * (height * 0.18f);
+
+	if (visible_in(*snap, cam, shoulder + offset)) return true;
+	if (visible_in(*snap, cam, shoulder - offset)) return true;
+
+	return false;
 }
 
 float open_radius(const math::vector3& fallback_eye, float max_radius)
@@ -479,6 +641,8 @@ float open_radius(const math::vector3& fallback_eye, float max_radius)
 
 	auto snap = get_snap();
 
+	// No geometry to measure against: hand back the full size rather than a tiny
+	// volume, so weather looks the same as it did before the snapshot exists.
 	if (!snap || snap->boxes.empty() || snap->grid.empty())
 		return max_radius;
 
@@ -514,6 +678,9 @@ float open_radius(const math::vector3& fallback_eye, float max_radius)
 	if (!have_frame)
 		return max_radius;
 
+	// A 3x3 grid of rays across the view cone, then the low third of what they
+	// hit: one open direction - a doorway, the far end of a corridor - cannot hold
+	// the volume at full size while the rest of the view is a wall.
 	constexpr int   kProbes = 9;
 	constexpr float kSpread = 0.45f;
 
@@ -532,6 +699,8 @@ float open_radius(const math::vector3& fallback_eye, float max_radius)
 				continue;
 			dir = dir * (1.f / len);
 
+			// A probe shorter than a stud means the camera is inside geometry, which
+			// is not something to size the volume from - treat it as open.
 			const float hit = march(*snap, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, 1.f, max_radius);
 			hits[count++] = (hit > 1.f) ? hit : max_radius;
 		}

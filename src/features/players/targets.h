@@ -3,6 +3,13 @@
 #include <cstdint>
 #include <mutex>
 
+// The player the user pinned with the Players tab target button.
+//
+// This is deliberately not the aimbot's sticky target. That one is transient: it
+// is dropped whenever the key is released, the entity leaves the cache, or a
+// validity read fails, so it could never hold a player the aim features were
+// asked to focus on. The pin lives here instead, survives all of that, and is
+// read from the feature threads while the UI thread writes it.
 namespace targets
 {
 	inline std::mutex    mtx;

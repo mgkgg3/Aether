@@ -20,9 +20,9 @@ namespace debug
 
 	void section(const char* title);
 
-
+	
 	void set_quiet(bool quiet);
 
-
+	
 	void status(const char* label, const char* fmt, ...);
 }

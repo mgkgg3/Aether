@@ -62,6 +62,24 @@ static void fly_hack()
 		{
 			math::vector3 cur_pos = prim.get_position();
 
+			if (settings::movement::flyhack::mode == 3)
+			{
+				// Glide: keep whatever momentum the last step left and
+				// bleed it off.  Unlike the position modes this never pins the
+				// character, so collisions still resolve and the camera keeps
+				// its own smoothing.
+				math::vector3 vel = memory->read<math::vector3>(
+					prim.address + Offsets::Primitive::AssemblyLinearVelocity);
+				vel.y = 0.f;
+				vel = vel * 0.90f;
+				for (int i = 0; i < 1000; i++)
+				{
+					rbx::humanoid_t::write_gravity(0.0f);
+					memory->write<math::vector3>(prim.address + Offsets::Primitive::AssemblyLinearVelocity, vel);
+				}
+				return;
+			}
+
 			if (settings::movement::flyhack::mode == 0)
 			{
 				try {
@@ -126,6 +144,15 @@ static void fly_hack()
 					memory->write<math::vector3>(prim.address + Offsets::Primitive::Position, new_pos);
 					memory->write<math::matrix3>(prim.address + Offsets::Primitive::Rotation, cur_rot);
 					memory->write<math::vector3>(prim.address + Offsets::Primitive::AssemblyLinearVelocity, {});
+				}
+			}
+			else if (settings::movement::flyhack::mode == 3)
+			{
+				math::vector3 vel = rotated * settings::movement::flyhack::speed;
+				for (int i = 0; i < 1000; i++)
+				{
+					rbx::humanoid_t::write_gravity(0.0f);
+					memory->write<math::vector3>(prim.address + Offsets::Primitive::AssemblyLinearVelocity, vel);
 				}
 			}
 		}

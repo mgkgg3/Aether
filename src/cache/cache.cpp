@@ -255,6 +255,10 @@ static void stall_watchdog()
 
 bool cache::is_teammate(const entity_t& e)
 {
+	// The Team instance is what decides this. Colour and name-hash fallbacks used to
+	// stand in when it could not be read, but a teamless player still reports a
+	// default colour, so those fallbacks answered 'teammate' for whole lobbies.
+	// Address only, and an unknown team means 'not a teammate'.
 	const std::uint64_t mine = cached_local_team.load(std::memory_order_relaxed);
 	if (!mine || !e.team)
 		return false;

@@ -99,7 +99,7 @@ const char* keybind_get_key_name(int key)
     if (key == 0) return "None";
     for (int i = 0; i < s_kb_key_count; i++)
         if (s_kb_keys[i].value == key) return s_kb_keys[i].name;
-
+    
     if (key >= VK_F1 && key <= VK_F12) {
         static char fb[5]; snprintf(fb, sizeof fb, "F%d", key - VK_F1 + 1);
         return fb;

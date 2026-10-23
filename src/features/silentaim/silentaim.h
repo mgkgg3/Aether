@@ -23,17 +23,17 @@ namespace silentaim
 
 	inline silent_state_t state{};
 
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	inline std::mutex state_mtx;
 
 	inline void publish_target(const cache::entity_t& e)
@@ -42,7 +42,7 @@ namespace silentaim
 		state.target = e;
 	}
 
-
+	
 	inline std::uint64_t target_part(const char* name)
 	{
 		std::lock_guard<std::mutex> lk(state_mtx);

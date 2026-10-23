@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <render/SurfaceTex.h>
+
 namespace aether
 {
 	namespace bg
@@ -28,6 +30,7 @@ namespace aether
 			Aurora,
 			Grid,
 			Tiles,
+			Topography,
 
 			COUNT
 		};
@@ -43,7 +46,8 @@ namespace aether
 			"Confetti\0"
 			"Aurora\0"
 			"Neon Grid\0"
-			"Glass Tiles\0";
+			"Glass Tiles\0"
+			"Topography\0";
 
 		struct Config
 		{
@@ -56,6 +60,34 @@ namespace aether
 			float wind     = 0.20f;
 			float glow     = 0.55f;
 			bool  parallax = true;
+
+			// The falling elements fall along this angle, in degrees from straight
+			// down (negative leans left).  It is the *velocity* the drops are given
+			// and the direction their streaks are drawn along, so a drop and its
+			// line can never disagree about which way it is going.
+			float angle    = 0.0f;
+
+			// Rain streak length, as a multiple of size.  The length itself follows
+			// the drop's own speed, so this is a persistence multiplier and not a
+			// fixed number of pixels - see draw_rain.
+			float streak   = 1.0f;
+
+			// How far each drop may lean off `angle`, in degrees.  Zero makes every
+			// drop parallel, which reads as a comb rather than as rain.
+			float spread   = 4.0f;
+
+			// The streak's width, as a multiple of the drop's size.
+			float width    = 1.0f;
+
+			// The material under the effect.  Neither one is this file's to set -
+			// they come from the backdrop's own sliders - but every effect reads
+			// them so what it draws belongs to the glass instead of sitting on top
+			// of whatever the glass happens to be.  `veil` is the blur (0 is a
+			// sharp backdrop, 1 a heavy frost); it widens and softens the light and
+			// fades fine detail.  `tint` is the darkening of the capture, and it
+			// takes the peak down because a dark plate needs less light.
+			float veil     = 0.f;
+			float tint     = 0.f;
 		};
 
 		namespace detail
@@ -104,13 +136,28 @@ namespace aether
 				if (r <= 0.f || alpha <= 0.001f)
 					return;
 
+				// The halo, sampled: one quad of the dithered falloff instead of three
+				// filled circles.  Those circles were the pixely part - three hard
+				// steps of alpha, so a bright particle over the frost read as a dot
+				// with rings around it.  The dot itself stays a filled circle: at a
+				// few pixels across that is exactly what a dot is.
 				if (glow > 0.02f)
 				{
-					for (int i = 3; i >= 1; --i)
+					if (const ImTextureID tex = surface::radial())
 					{
-						float rad = r * (1.f + 0.85f * glow * (float)i);
-						float a   = alpha * 0.22f * glow / (float)i;
-						dl->AddCircleFilled(c, rad, with_alpha(col, a), 0);
+						const float rad = r * (1.f + 1.9f * glow);
+						dl->AddImage(tex, ImVec2(c.x - rad, c.y - rad), ImVec2(c.x + rad, c.y + rad),
+							ImVec2(0.f, 0.f), ImVec2(1.f, 1.f),
+							with_alpha(col, alpha * 0.85f * glow));
+					}
+					else
+					{
+						for (int i = 3; i >= 1; --i)
+						{
+							float rad = r * (1.f + 0.85f * glow * (float)i);
+							float a   = alpha * 0.22f * glow / (float)i;
+							dl->AddCircleFilled(c, rad, with_alpha(col, a), 0);
+						}
 					}
 				}
 				dl->AddCircleFilled(c, r, with_alpha(col, alpha), 0);
@@ -179,14 +226,31 @@ namespace aether
 					break;
 
 				case Effect::Rain:
-					p.x    = rng_range(-30.f, w + 30.f);
+				{
+					// The fall is one vector at `angle` from straight down, plus this
+					// drop's own lean inside `spread`: the drop travels along it and the
+					// streak is drawn along it, so a slanted drop is a slanted line and
+					// not an upright one sliding sideways.  Without the lean every drop
+					// is parallel to every other and the element reads as a comb.
+					const float lean = rng_range(-cfg.spread, cfg.spread);
+					const float rad  = (cfg.angle + lean) * 0.01745329252f;
+					const float spd  = rng_range(620.f, 1050.f) * depth_scale;
 
+					// Spawned up-wind of the rectangle when the fall is not vertical,
+					// or the drops would only appear part-way across it.  The lead is
+					// the widest lean any drop may have, since a drop leaning further
+					// than the band is wide would enter from outside it.
+					const float wide = (ImFabs(cfg.angle) + ImFabs(cfg.spread)) * 0.01745329252f;
+					const float lead = ImFabs(std::sin(wide > 1.4f ? 1.4f : wide)) * h;
+
+					p.x    = rng_range(-30.f - lead, w + 30.f + lead);
 					p.y    = initial ? rng_range(-h * 0.5f, h) : rng_range(-58.f, -10.f);
-					p.vx   = 0.f;
-					p.vy   = rng_range(620.f, 1050.f) * depth_scale;
+					p.vx   = spd * std::sin(rad);
+					p.vy   = spd * std::cos(rad);
 					p.size = rng_range(0.9f, 1.7f) * cfg.size;
 					p.rot_v = 0.f;
-					break;
+				}
+				break;
 
 				case Effect::Stars:
 					p.x    = rng_range(0.f, w);
@@ -275,12 +339,44 @@ namespace aether
 			inline void draw_rain(ImDrawList* dl, const particle_t& p, const Config& cfg, ImU32 base)
 			{
 				const float a = cfg.opacity * (0.20f + 0.55f * p.depth);
-				const float len = 14.f + 26.f * p.depth * cfg.size;
-				const float drift_x = cfg.wind * 120.f * 0.028f;
-				ImVec2 head(p.x, p.y);
-				ImVec2 tail(head.x - drift_x, head.y - p.vy * 0.028f - len);
-				dl->AddLine(tail, head, with_alpha(base, a * 0.45f), 1.0f);
-				dl->AddLine(ImVec2(head.x, head.y - len * 0.45f), head, with_alpha(base, a), 1.0f);
+
+				// Along the drop's own velocity, so the streak is the path it is
+				// travelling: straight down for a vertical fall, slanted for anything
+				// else, at any angle, and leaning with the drop when it has a lean of
+				// its own.
+				const float vlen = std::sqrt(p.vx * p.vx + p.vy * p.vy);
+				const float ux = vlen > 0.001f ? p.vx / vlen : 0.f;
+				const float uy = vlen > 0.001f ? p.vy / vlen : 1.f;
+				const ImVec2 head(p.x, p.y);
+
+				// How long a drop trails behind itself.  It is the distance a drop
+				// covers in a short, fixed *time*, so it follows the speed the drop
+				// is actually travelling at - `cfg.speed` is the same factor the
+				// simulation's own step is scaled by.  A fixed length instead is what
+				// made slow rain look wrong: at a tenth of the speed the drops crawl
+				// but the streaks stay as long as they were, so the element turns
+				// into a field of near-stationary sticks rather than a drizzle.
+				constexpr float k_trail_seconds = 0.030f;
+				const float pers = k_trail_seconds * ImClamp(cfg.streak, 0.2f, 3.f) *
+					ImClamp(cfg.size, 0.2f, 3.f) * (0.55f + 0.75f * p.depth);
+				const float len = ImClamp(vlen * ImClamp(cfg.speed, 0.05f, 4.f) * pers, 3.f, 180.f);
+
+				const float w = ImMax(1.f, p.size * 0.6f * ImClamp(cfg.width, 0.2f, 3.f));
+
+				// Three segments, each dimmer than the last, so the tail fades
+				// instead of stopping: a streak that ends in a hard edge is what
+				// makes cheap rain read as sticks.
+				for (int i = 0; i < 3; ++i)
+				{
+					const float t0 = (float)i / 3.f;
+					const float t1 = (float)(i + 1) / 3.f;
+					const ImVec2 a0(head.x - ux * len * t0, head.y - uy * len * t0);
+					const ImVec2 a1(head.x - ux * len * t1, head.y - uy * len * t1);
+					dl->AddLine(a0, a1, with_alpha(base, a * (1.f - t0 * 0.82f)), w);
+				}
+
+				soft_dot(dl, head, ImMax(0.6f, p.size * 0.7f * ImClamp(cfg.width, 0.2f, 3.f)),
+					base, a * 0.85f, cfg.glow * 0.35f);
 			}
 
 			inline void draw_stars(ImDrawList* dl, const particle_t& p, const Config& cfg, float t, ImU32 base)
@@ -426,44 +522,172 @@ namespace aether
 					IM_COL32(255, 255, 255, (int)(26.f * a)));
 			}
 
-			inline void draw_aurora(ImDrawList* dl, const ImVec2& a, const ImVec2& b, const Config& cfg, float t, ImU32 base)
+			// The aurora, as three bands of light that are gradients rather than
+			// stacks of horizontal strips.
+			//
+			// What it was: 64 vertical strips per ribbon, each a four-corner quad
+			// with a flat alpha.  A strip has no vertical falloff, so the band had a
+			// hard top edge and a hard bottom edge, and the only softening was the
+			// strip-to-strip step in alpha - which, stacked over the frost, is what
+			// read as pixelated bands.  A ribbon is a light, so it now samples the
+			// ribbon texture: a bell across the band and a bell down its length, the
+			// second one dithered so the fade has no rings.  The same curve costs
+			// ninety-six quads instead of the strips' hundred and twenty-eight, and
+			// has neither an edge nor a step in it.
+			inline void draw_aurora_ribbon(ImDrawList* dl, const ImVec2& a, const ImVec2& b,
+				const Config& cfg, float t, int ribbon, ImU32 tint, float alpha)
 			{
 				const float w = b.x - a.x, h = b.y - a.y;
-				const int strips = 64;
-				const float step = w / (float)strips;
+				const float veil = ImClamp(cfg.veil, 0.f, 1.f);
+
+				const float speed  = (0.22f + 0.16f * (float)ribbon) * cfg.speed;
+				const float amp    = h * (0.055f + 0.030f * (float)ribbon);
+				const float center = a.y + h * (0.30f + 0.16f * (float)ribbon);
+
+				// A heavy frost scatters light: the bands spread and their peak comes
+				// down, which is the difference between a ribbon *under* frost and a
+				// ribbon painted on top of it.
+				const float half   = h * (0.16f + 0.05f * (float)ribbon) * (1.f + 0.75f * veil);
+				const float peak   = alpha * (1.f - 0.30f * veil);
+
+				auto centre_at = [&](float u)
+				{
+					return center
+						+ std::sin(t * speed + u * 6.0f + (float)ribbon * 1.7f) * amp
+						+ std::sin(t * speed * 2.1f + u * 13.f) * amp * 0.35f;
+				};
+
+				const ImTextureID tex = surface::ribbon();
+				if (!tex)
+				{
+					// Nothing sampled yet: fall back to the old strip wash, which at
+					// least still fades in alpha.
+					const int strips = 64;
+					const float step = w / (float)strips;
+					for (int i = 0; i < strips; ++i)
+					{
+						const float u0 = (float)i / (float)strips;
+						const float u1 = (float)(i + 1) / (float)strips;
+						const float yc = centre_at((u0 + u1) * 0.5f);
+						dl->AddRectFilledMultiColor(
+							ImVec2(a.x + u0 * w, yc - half), ImVec2(a.x + u1 * w + 0.5f, yc + half),
+							with_alpha(tint, 0.f), with_alpha(tint, 0.f),
+							with_alpha(tint, peak), with_alpha(tint, peak));
+					}
+					return;
+				}
+
+				const int steps = 96;
+				const ImU32 core = with_alpha(0xFFFFFFFFu, 1.f);
+
+				for (int i = 0; i < steps; ++i)
+				{
+					const float u0 = (float)i / (float)steps;
+					const float u1 = (float)(i + 1) / (float)steps;
+
+					const float x0 = a.x + u0 * w;
+					const float x1 = a.x + u1 * w;
+					const float y0 = centre_at(u0);
+					const float y1 = centre_at(u1);
+
+					// The band breathes wider and narrower along its length, so it
+					// never reads as a straight strip of light.
+					const float th0 = half * (0.86f + 0.14f * std::sin(u0 * 9.f + t * 0.3f + (float)ribbon));
+					const float th1 = half * (0.86f + 0.14f * std::sin(u1 * 9.f + t * 0.3f + (float)ribbon));
+
+					dl->AddImageQuad(tex,
+						ImVec2(x0, y0 - th0), ImVec2(x1, y1 - th1),
+						ImVec2(x1, y1 + th1), ImVec2(x0, y0 + th0),
+						ImVec2(u0, 0.f), ImVec2(u1, 0.f), ImVec2(u1, 1.f), ImVec2(u0, 1.f),
+						with_alpha(tint, peak));
+
+					// A narrow, brighter core along the middle of the band: the same
+					// texture squeezed to a third of the height is the hot line.
+					dl->AddImageQuad(tex,
+						ImVec2(x0, y0 - th0 * 0.34f), ImVec2(x1, y1 - th1 * 0.34f),
+						ImVec2(x1, y1 + th1 * 0.34f), ImVec2(x0, y0 + th0 * 0.34f),
+						ImVec2(u0, 0.f), ImVec2(u1, 0.f), ImVec2(u1, 1.f), ImVec2(u0, 1.f),
+						with_alpha(core & 0x00FFFFFFu, peak * 0.42f));
+				}
+			}
+
+			inline void draw_aurora(ImDrawList* dl, const ImVec2& a, const ImVec2& b, const Config& cfg, float t, ImU32 base)
+			{
+				const float veil = ImClamp(cfg.veil, 0.f, 1.f);
+				const float tint = ImClamp(cfg.tint, 0.f, 1.f);
+				const float gain = (1.f - 0.35f * tint) * (1.f + 0.20f * veil);
 
 				for (int ribbon = 0; ribbon < 3; ++ribbon)
 				{
-					const float speed  = 0.22f + 0.16f * (float)ribbon;
-					const float amp    = h * (0.055f + 0.03f * (float)ribbon);
-					const float center = a.y + h * (0.30f + 0.16f * (float)ribbon);
-					const float half   = h * (0.16f + 0.05f * (float)ribbon);
-					const float alpha  = cfg.opacity * (0.26f - 0.06f * (float)ribbon) * (0.6f + 0.4f * cfg.glow);
+					const float alpha = cfg.opacity * (0.26f - 0.06f * (float)ribbon) *
+					                    (0.6f + 0.4f * cfg.glow) * gain;
 
-					ImU32 tint = base;
-					if (ribbon == 1) tint = IM_COL32(150, 255, 220, 255);
-					if (ribbon == 2) tint = IM_COL32(190, 160, 255, 255);
+					ImU32 colour = base;
+					if (ribbon == 1) colour = IM_COL32(150, 255, 220, 255);
+					if (ribbon == 2) colour = IM_COL32(190, 160, 255, 255);
 
-					for (int i = 0; i < strips; ++i)
-					{
-						const float x0 = a.x + (float)i * step;
-						const float x1 = x0 + step + 0.5f;
-						const float u  = (float)i / (float)strips;
-						const float yc = center
-							+ std::sin(t * speed * cfg.speed + u * 6.0f + (float)ribbon * 1.7f) * amp
-							+ std::sin(t * speed * 2.1f + u * 13.f) * amp * 0.35f;
-						const float top = yc - half, bot = yc + half;
+					draw_aurora_ribbon(dl, a, b, cfg, t, ribbon, colour, alpha);
+				}
+			}
 
-						dl->AddRectFilledMultiColor(
-							ImVec2(x0, top), ImVec2(x1, bot),
-							with_alpha(tint, 0.f), with_alpha(tint, 0.f),
-							with_alpha(tint, alpha), with_alpha(tint, alpha));
+			// Topography: a contour map of a slowly drifting height field.
+			//
+			// The map is a texture because contours are detail, and detail drawn as
+			// thousands of line segments per frame is both slow and never quite
+			// clean - a 1 px line stepped across a curved level crawls.  The two
+			// iso-line maps are baked tileable and anti-aliased once, then laid down
+			// as scrolled quads: one coarse set that gives the shape, one finer set
+			// drifting at its own rate that gives it depth.  Both are white, so the
+			// element's colour and the accent both come through the vertex tint.
+			inline void draw_topography(ImDrawList* dl, const ImVec2& a, const ImVec2& b, const Config& cfg, float t, ImU32 base)
+			{
+				const ImTextureID coarse = surface::topo_coarse();
+				const ImTextureID fine   = surface::topo_fine();
+				if (!coarse && !fine)
+					return;
 
-						dl->AddRectFilledMultiColor(
-							ImVec2(x0, yc - half * 0.35f), ImVec2(x1, yc + half * 0.35f),
-							with_alpha(0xFFFFFFFFu, 0.f), with_alpha(0xFFFFFFFFu, 0.f),
-							with_alpha(0xFFFFFFFFu, alpha * 0.5f), with_alpha(0xFFFFFFFFu, alpha * 0.5f));
-					}
+				const float w = b.x - a.x, h = b.y - a.y;
+				const float veil = ImClamp(cfg.veil, 0.f, 1.f);
+				const float tint = ImClamp(cfg.tint, 0.f, 1.f);
+
+				// Fine detail is the first thing a frost eats, so the lines lose
+				// contrast as the blur rises - the map is still there, it is just
+				// seen through the same glass as everything else.
+				const float gain  = (1.f - 0.45f * tint) * (1.f - 0.40f * veil);
+				const float alpha = cfg.opacity * (0.09f + 0.13f * cfg.glow) * gain;
+				if (alpha <= 0.002f)
+					return;
+
+				// `size` is the zoom of the map: a larger tile is a wider country.
+				// The default is well over one screen wide, because a contour map is
+				// the one element where a repeat is obvious - a landscape does not
+				// tile, and the eye finds the seam before it finds the shape.
+				const float tile = ImMax(320.f, 1200.f * ImClamp(cfg.size, 0.2f, 3.f));
+				const float dx = t * 11.f * cfg.speed;
+				const float dy = t * 6.f * cfg.speed;
+
+				if (coarse)
+				{
+					dl->AddImage(coarse, a, b,
+						ImVec2(dx / tile, dy / tile),
+						ImVec2((dx + w) / tile, (dy + h) / tile),
+						with_alpha(base, alpha));
+				}
+
+				if (fine)
+				{
+					// The second set runs at a different scale and drifts the other
+					// way, which is what stops two contour sets reading as one sheet
+					// of wallpaper.
+					const float ftile = tile * 0.58f;
+					const float fu = -dx * 0.7f / ftile + 0.31f;
+					const float fv =  dy * 0.4f / ftile + 0.13f;
+					const float fa = alpha * (0.35f + 0.35f * ImClamp(cfg.density, 0.f, 1.5f)) * (1.f - 0.45f * veil);
+					if (fa > 0.002f)
+						dl->AddImage(fine, a, b,
+							ImVec2(fu, fv),
+							ImVec2(fu + w / ftile, fv + h / ftile),
+							with_alpha(base, fa));
 				}
 			}
 
@@ -473,7 +697,11 @@ namespace aether
 				const float horizon = a.y + h * 0.42f;
 				const float cx = a.x + w * 0.5f;
 				const float bottom = b.y;
-				const float alpha = cfg.opacity * (0.14f + 0.20f * cfg.glow);
+				// Lines are detail: a frost takes their contrast down, a tint takes
+				// their peak, so the grid stays behind the glass rather than on it.
+				const float alpha = cfg.opacity * (0.14f + 0.20f * cfg.glow)
+					* (1.f - 0.45f * ImClamp(cfg.tint, 0.f, 1.f))
+					* (1.f - 0.35f * ImClamp(cfg.veil, 0.f, 1.f));
 				const float pulse = 0.6f + 0.4f * std::sin(t * 0.7f * cfg.speed);
 
 				const int rails = 21;
@@ -544,6 +772,24 @@ namespace aether
 				dl->PopClipRect();
 				return;
 			}
+			if (fx == Effect::Topography)
+			{
+				draw_topography(dl, rect_min, rect_max, cfg, t, base);
+				dl->PopClipRect();
+				return;
+			}
+
+			// The elements belong to the material too: a tinted plate needs less
+			// light on it, and a frost scatters the elements behind it, so they lose
+			// a little of their peak instead of being drawn at the strength they
+			// would have over a sharp screen.
+			Config look = cfg;
+			look.opacity *= (1.f - 0.35f * ImClamp(cfg.tint, 0.f, 1.f)) *
+			                (1.f + 0.15f * ImClamp(cfg.veil, 0.f, 1.f));
+			// Fine detail (rain streaks, glyphs, small flakes) is what a frost eats
+			// first; growing them slightly keeps the element legible instead of
+			// turning it into a smear.
+			look.size *= 1.f + 0.35f * ImClamp(cfg.veil, 0.f, 1.f);
 
 			std::vector<particle_t>& ps = pool();
 			const int want = ImClamp((int)((float)base_count(fx) * ImClamp(cfg.density, 0.05f, 4.0f)), 1, 900);
@@ -576,7 +822,9 @@ namespace aether
 					break;
 
 				case Effect::Rain:
-					p.x += wind * 120.f * dt;
+					// The angle is the direction, not the wind: a slanted fall keeps its
+					// slant instead of being carried back upright by a sideways push.
+					p.x += p.vx * dt;
 					p.y += p.vy * dt;
 					break;
 
@@ -623,7 +871,7 @@ namespace aether
 				else if (p.y < -margin * 1.6f)  out = true;
 				if (fx == Effect::Embers && p.life <= 0.f) out = true;
 				if (out)
-					spawn(p, fx, w, h, cfg, false);
+					spawn(p, fx, w, h, look, false);
 
 				particle_t pp = p;
 				pp.x += rect_min.x;
@@ -631,14 +879,14 @@ namespace aether
 
 				switch (fx)
 				{
-				case Effect::Snow:     draw_snow(dl, pp, cfg, t, base); break;
-				case Effect::Rain:     draw_rain(dl, pp, cfg, base); break;
-				case Effect::Stars:    draw_stars(dl, pp, cfg, t, base); break;
-				case Effect::Bokeh:    draw_bokeh(dl, pp, cfg, base); break;
-				case Effect::Matrix:   draw_matrix(dl, pp, cfg, base); break;
-				case Effect::Embers:   draw_ember(dl, pp, cfg, t, base); break;
-				case Effect::Confetti: draw_confetti(dl, pp, cfg, base); break;
-				case Effect::Tiles:    draw_tiles(dl, pp, cfg, t, base); break;
+				case Effect::Snow:     draw_snow(dl, pp, look, t, base); break;
+				case Effect::Rain:     draw_rain(dl, pp, look, base); break;
+				case Effect::Stars:    draw_stars(dl, pp, look, t, base); break;
+				case Effect::Bokeh:    draw_bokeh(dl, pp, look, base); break;
+				case Effect::Matrix:   draw_matrix(dl, pp, look, base); break;
+				case Effect::Embers:   draw_ember(dl, pp, look, t, base); break;
+				case Effect::Confetti: draw_confetti(dl, pp, look, base); break;
+				case Effect::Tiles:    draw_tiles(dl, pp, look, t, base); break;
 				default: break;
 				}
 			}

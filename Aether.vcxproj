@@ -102,6 +102,8 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
+      <!-- No debug info: the .pdb is not shipped and its path inside the exe
+           would carry the build machine's directory layout. -->
       <GenerateDebugInformation>false</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
@@ -137,6 +139,8 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
+      <!-- No debug info: the .pdb is not shipped and its path inside the exe
+           would carry the build machine's directory layout. -->
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
       <AdditionalDependencies>d3d11.lib;d3dx11.lib;freetype.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -156,10 +160,10 @@
     <ClCompile Include="ext\im_anim\im_anim.cpp" />
     <ClCompile Include="src\cache\cache.cpp" />
     <ClCompile Include="src\render\Backdrop.cpp" />
+    <ClCompile Include="src\render\SurfaceTex.cpp" />
     <ClCompile Include="src\game\rescan\rescan.cpp" />
     <ClCompile Include="src\game\game_context.cpp" />
     <ClCompile Include="src\game\game_structure.cpp" />
-    <ClCompile Include="src\features\spotify\Spotify.cpp" />
     <ClCompile Include="src\features\aimbot\aimbot.cpp" />
     <ClCompile Include="src\features\silentaim\silentaim.cpp" />
     <ClCompile Include="src\features\rage\rapidfire.cpp" />
@@ -171,6 +175,7 @@
     <ClCompile Include="src\features\movement\noclip.cpp" />
     <ClCompile Include="src\features\movement\jumpcooldown.cpp" />
     <ClCompile Include="src\features\misc\exploits.cpp" />
+    <ClCompile Include="src\features\fusion\SourcePack.cpp" />
     <ClCompile Include="src\features\misc\SkyShader.cpp" />
     <ClCompile Include="src\features\effects\Effects.cpp" />
     <ClCompile Include="src\features\esp\trails\Trails.cpp" />
@@ -179,6 +184,7 @@
     <ClCompile Include="src\features\misc\hitsounds_data.cpp" />
     <ClCompile Include="src\features\misc\SkyVideo.cpp" />
     <ClCompile Include="src\features\world\world_effects.cpp" />
+    <ClCompile Include="src\features\world\skybox.cpp" />
     <ClCompile Include="src\features\esp\esp.cpp" />
     <ClCompile Include="src\features\esp\Avatar.cpp" />
     <ClCompile Include="src\features\esp\BoxFill.cpp" />
@@ -220,6 +226,7 @@
     </MASM>
   </ItemGroup>
   <ItemGroup>
+    <!-- Typeface: Geist + Font Awesome, carried inside the exe as RCDATA. -->
     <ResourceCompile Include="resources\AetherFonts.rc" />
     <ResourceCompile Include="resources\hitsounds\hitsounds.rc" />
   </ItemGroup>
@@ -253,7 +260,10 @@
     <ClInclude Include="src\features\movement\noclip.h" />
     <ClInclude Include="src\features\movement\jumpcooldown.h" />
     <ClInclude Include="src\features\misc\exploits.h" />
+    <ClInclude Include="src\features\fusion\SourcePack.h" />
     <ClInclude Include="src\features\world\world_effects.h" />
+    <ClInclude Include="src\features\world\skybox.h" />
+    <ClInclude Include="src\features\world\SkyPresets.h" />
     <ClInclude Include="src\features\esp\esp.h" />
     <ClInclude Include="src\features\hitbox_expander\hitbox_expander.h" />
     <ClInclude Include="src\features\raycast\RaycastEngine.h" />
@@ -266,7 +276,6 @@
     <ClInclude Include="src\game\game.h" />
     <ClInclude Include="src\game\game_context.h" />
     <ClInclude Include="src\game\game_structure.h" />
-    <ClInclude Include="src\features\spotify\Spotify.h" />
     <ClInclude Include="src\gui\CGui.h" />
     <ClInclude Include="src\gui\CTextEditor.h" />
     <ClInclude Include="src\gui\CTextures.h" />
@@ -274,6 +283,7 @@
     <ClInclude Include="src\memory\memory.h" />
     <ClInclude Include="src\render\render.h" />
     <ClInclude Include="src\render\Backdrop.h" />
+    <ClInclude Include="src\render\SurfaceTex.h" />
     <ClInclude Include="src\sdk\math\math.h" />
     <ClInclude Include="src\sdk\offsets.h" />
     <ClInclude Include="src\sdk\sdk.h" />

@@ -209,6 +209,9 @@ namespace aether_raycast
 			math::vector3 cam{};
 			if (!read_camera_pos(cam)) return;
 
+			// The cache thread rewrites cached_players whenever the client
+			// rebinds (including the frame Roblox is closed), so the whole walk
+			// runs under the cache lock instead of racing the vector.
 			std::vector<std::pair<std::uintptr_t, rbx::model_instance_t>> targets;
 			{
 				std::lock_guard<std::mutex> lk(cache::mtx);

@@ -6,9 +6,11 @@
 #include "SkyVideo.h"
 
 #include <debug/DebugConsole.h>
+#include <game/game.h>
 #include <memory/memory.h>
 #include <sdk/math/math.h>
 #include <sdk/offsets.h>
+#include <sdk/sdk.h>
 #include <settings.h>
 
 #include <cstdarg>
@@ -1132,6 +1134,23 @@ std::uintptr_t remote_d3d11()
 	return g.r_d3d11;
 }
 
+// How big a module mapped into *this* process is, from its own PE headers.  The
+// remote side of remap() needs the local image's size and this is the only place
+// that can read it without a remote round trip.
+std::size_t local_module_size(HMODULE mod)
+{
+	if (!mod)
+		return 0;
+	const auto* b   = reinterpret_cast<const std::uint8_t*>(mod);
+	const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(b);
+	if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return 0;
+	const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(b + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		return 0;
+	return (std::size_t)nt->OptionalHeader.SizeOfImage;
+}
+
 std::uintptr_t remap(std::uintptr_t local)
 {
 	if (!g_local_d3d11 || !local)
@@ -1140,6 +1159,17 @@ std::uintptr_t remap(std::uintptr_t local)
 	const std::uintptr_t r = remote_d3d11();
 	if (!r || local < l)
 		return 0;
+
+	// Both ends, not just the near one.  A vtable slot can point outside our
+	// d3d11.dll - a client-shipped trampoline, an import thunk, a detour - and
+	// mapping one of those by its offset produces a plausible-looking address
+	// inside the client that belongs to something else entirely.  The scan then
+	// matches on it and finds nothing, with no hint as to why; refusing it here
+	// keeps the search honest about what it can actually compare.
+	const std::size_t sz = local_module_size(g_local_d3d11);
+	if (sz && (local - l) >= (std::uintptr_t)sz)
+		return 0;
+
 	return r + (local - l);
 }
 
@@ -1150,14 +1180,11 @@ std::uintptr_t remap_fn(void* p)
 
 std::uintptr_t render_view()
 {
-	const std::uintptr_t base = module_base();
-	if (!base)
-		return 0;
-	const std::uint64_t ve = memory->read<std::uint64_t>(base + Offsets::VisualEngine::Pointer);
-	if (!mem_valid(ve))
-		return 0;
-	const std::uint64_t rv = memory->read<std::uint64_t>(ve + Offsets::VisualEngine::RenderView);
-	return mem_valid(rv) ? (std::uintptr_t)rv : 0;
+	// Both chains that reach it, through the SDK: the VisualEngine field and the
+	// DataModel walk.  A stale VisualEngine field used to end this feature at
+	// "no render view", which names no fix and gives the user nothing to try.
+	const std::uint64_t rv = rbx::visualengine_t::render_view();
+	return (std::uintptr_t)rv;
 }
 
 bool slot_is(std::uintptr_t obj, int slot, const std::uintptr_t* fns, int n)
@@ -1217,12 +1244,18 @@ void collect_dev_fns(std::uintptr_t* out, int& n)
 
 }
 
-bool find_d3d()
+// `why` names the step that failed.  Every one of these has a different fix, and
+// a single "no device" for all of them is a report nobody can act on - which is
+// what this returned before.
+bool find_d3d(const char*& why)
 {
 	if (g.device && mem_valid(g.device))
 		return true;
 	if (!local_d3d())
+	{
+		why = "no local d3d11";
 		return false;
+	}
 
 	std::uintptr_t create_ps[8]{};
 	int nps = 0;
@@ -1246,11 +1279,20 @@ bool find_d3d()
 		add_set(g_ctx_vt[9]);
 
 	if (!nps)
+	{
+		// Nothing to compare against: the device-identity function came back
+		// empty from our own device's vtable, so no amount of scanning the client
+		// can produce an answer.
+		why = "no device vtable fn";
 		return false;
+	}
 
 	const std::uintptr_t rv = render_view();
 	if (!rv)
+	{
+		why = "no render view";
 		return false;
+	}
 
 	std::uintptr_t wrap = 0;
 	if (Offsets::RenderView::DeviceD3D11)
@@ -1270,7 +1312,10 @@ bool find_d3d()
 	if (!dev && ctx)
 		dev = scan_slot(ctx, 0x100, 15, create_ps, nps);
 	if (!dev)
+	{
+		why = mem_valid(wrap) ? "no device in the d3d11 wrapper" : "no d3d11 wrapper";
 		return false;
+	}
 
 	g.device = dev;
 	g.ctx = ctx;
@@ -2315,9 +2360,10 @@ bool install()
 		g_fail = now;
 		return false;
 	}
-	if (!find_d3d())
+	const char* why = "no device";
+	if (!find_d3d(why))
 	{
-		fail("no device");
+		fail(why);
 		g_fail = now;
 		return false;
 	}
@@ -2749,6 +2795,20 @@ void run()
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(16));
 	}
+}
+
+// The entry the client's own d3d11 build keeps in slot `slot`. The dll is the
+// same file in both processes, so a table built here and shifted onto the
+// client's base names the function the client itself calls - no dump offsets
+// and no vtable guessing involved.
+std::uint64_t remote_d3d_fn(bool context, int slot)
+{
+	if (slot < 0 || !local_d3d())
+		return 0;
+	void** vt = context ? g_ctx_vt : g_dev_vt;
+	if (!vt)
+		return 0;
+	return (std::uint64_t)remap_fn(vt[slot]);
 }
 
 }

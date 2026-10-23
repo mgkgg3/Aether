@@ -51,13 +51,13 @@ namespace rbx
 
 		rbx::model_instance_t get_model_instance() const;
 
-
-
-
-
-
+		
+		
+		
+		
+		
 		std::uint64_t get_team() const;
-
+		
 		std::uint32_t get_team_color() const;
 	};
 
@@ -103,23 +103,30 @@ namespace rbx
 	{
 		math::vector2 get_dimensions() const;
 
+		// The render view behind the scene the client is drawing, 0 while there
+		// is none.  Two chains reach it - the VisualEngine field and the walk
+		// through the DataModel - and both are tried, because the sky and the
+		// lighting both hang off this object and a stale field means a write
+		// that lands in an instance nobody rebuilds from.
+		static std::uint64_t render_view();
 
-
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
+		
+		
 		math::matrix4 get_viewmatrix() const;
 
-
-
+		
+		
 		static bool using_native_projection();
 
-
-
-
+		
+		
+		
 		static std::uintptr_t native_projection_offset();
 
 		static void update_window_offset();
@@ -128,8 +135,8 @@ namespace rbx
 		bool world_to_screen(const math::vector3& world, math::vector2& out, const math::vector2& dims, const math::matrix4& view) const;
 	};
 
-
-
+	
+	
 	std::uint64_t current_camera_address();
 
 	struct vector2int16 final
@@ -144,7 +151,7 @@ namespace rbx
 
 		math::vector3 get_position() const;
 		math::matrix3 get_rotation() const;
-
+		
 		float get_field_of_view() const;
 		void write_rotation(const math::matrix3& rotation);
 		void set_viewport(const vector2int16& val);
@@ -173,12 +180,12 @@ std::vector<T> rbx::interface_t::get_children() const
 	std::vector<T> children;
 	children.reserve(32);
 
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
 	for (std::uint64_t instance = memory->read<std::uint64_t>(start);
 	     instance != end && children.size() < 4096;
 	     instance += sizeof(std::shared_ptr<void*>))

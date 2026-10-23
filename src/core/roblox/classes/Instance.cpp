@@ -11,14 +11,17 @@ std::string Cheat::Instance::GetName() const
 		return "Unknown";
 	}
 
-	const std::uint64_t container = g_Memory.Read<std::uint64_t>(
+	// The name container holds the character pointer itself in this client:
+	// the string no longer sits behind a second field (Name is 0), so the old
+	// container + Name hop was one read of a pointer that is already the name.
+	const std::uint64_t name = g_Memory.Read<std::uint64_t>(
 		this->address + Offsets::Instance::NameContainer);
-	if (!g_Memory.IsValid(container))
+	if (!g_Memory.IsValid(name))
 	{
 		return "Unknown";
 	}
 
-	return g_Memory.ReadString(container + Offsets::Instance::Name);
+	return g_Memory.ReadString(name);
 }
 
 std::string Cheat::Instance::GetClassName() const

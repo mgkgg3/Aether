@@ -85,6 +85,26 @@ namespace
 		SendInput(2, inp, sizeof(INPUT));
 	}
 
+	// True while the user is holding the left button themselves.
+	//
+	// A click injected on top of that is not a second shot: it reaches the
+	// game as a release, which cancels the shot they are holding, and the
+	// physical button staying down does not re-arm it - so firing at somebody
+	// with the trigger on reads as the trigger *blocking* the gun.  That is
+	// what Skip While Firing stands down for, and turning the option off
+	// restores the old click-over-your-burst behaviour.
+	bool tb_user_holding_fire()
+	{
+		return (::GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+	}
+
+	// The trigger's optional scope check: fire only while the right button is
+	// held, the way a scoped shot is taken.
+	bool tb_aiming()
+	{
+		return (::GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+	}
+
 	const math::vector3 k_corners[8] = {
 		{-1,-1,-1},{1,-1,-1},{-1,1,-1},{1,1,-1},
 		{-1,-1, 1},{1,-1, 1},{-1,1, 1},{1,1, 1}
@@ -196,6 +216,16 @@ void rage::triggerbot::run()
 
 		if (!kb.enabled) { locked_target = 0; shot_armed = false; continue; }
 
+		// The scope check is a toggle: unchecking it lets the trigger fire with
+		// or without the right button, which is what a player who aims with a
+		// key other than the default needs.
+		if (settings::triggerbot::aim_check && !tb_aiming())
+		{
+			locked_target = 0;
+			shot_armed    = false;
+			continue;
+		}
+
 		if (!game::datamodel.address || !game::visengine.address) continue;
 
 		std::uint64_t camera = tb_camera();
@@ -240,7 +270,15 @@ void rage::triggerbot::run()
 			if (!entity.instance.address) continue;
 			if (entity.instance.address == local.instance.address) continue;
 
+			// A pinned player is the only thing the trigger is allowed to fire on,
+			// so a stray click cannot put a shot into whoever else is under the dot.
 			if (pinned != 0 && entity.instance.address != pinned) continue;
+
+			if (settings::triggerbot::aimbot_target_only)
+			{
+				const std::uint64_t held = aimbot::player.instance.address;
+				if (held == 0 || entity.instance.address != held) continue;
+			}
 
 			if (settings::triggerbot::team_check && cache::is_teammate(entity)) continue;
 			if (friends::is_skipped(entity.instance.address, pinned)) continue;
@@ -326,6 +364,19 @@ void rage::triggerbot::run()
 
 		if (fire)
 		{
+			// Skip While Firing (the default): their own click wins.  Skipping
+			// here - rather than clicking and letting the game sort it out - is
+			// what stops the trigger from cutting a held shot short.
+			//
+			// It must not mark the shot as taken, though.  Doing that left the
+			// trigger unarmed for the rest of the engagement, so the first
+			// manual burst at somebody turned it into nothing until the target
+			// changed - the delay was not a delay, it was a latch.  Standing
+			// down without touching the arming state means it fires the moment
+			// the button comes up, with no wait of its own.
+			if (settings::triggerbot::skip_while_firing && tb_user_holding_fire())
+				continue;
+
 			tb_click();
 			last_shot  = now;
 			shot_armed = true;

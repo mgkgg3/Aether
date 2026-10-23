@@ -12,11 +12,11 @@ namespace cache
 {
 	inline std::mutex mtx;
 
-
-
-
-
-
+	
+	
+	
+	
+	
 	inline std::atomic<std::uint64_t> tick_count{ 0 };
 	inline std::atomic<const char*>   phase{ "idle" };
 
@@ -35,9 +35,9 @@ namespace cache
 		std::string     name;
 		std::string     display_name;
 
-
-
-
+		
+		
+		
 		std::int64_t    user_id{ 0 };
 
 		std::uint8_t    rig_type;
@@ -46,23 +46,23 @@ namespace cache
 		std::unordered_map<std::string, rbx::part_t> parts;
 		std::string     tool_name;
 
-
-
-
+		
+		
+		
 		std::uint64_t   team{ 0 };
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
 		std::string     team_name;
-		std::uint32_t   team_color{ 0 };
+		std::uint32_t   team_color{ 0 };   
 		float           health{ 0.f };
 		float           max_health{ 0.f };
-
-
-
+		
+		
+		
 		int             state{ -1 };
 		bool            knocked{ false };
 
@@ -73,29 +73,29 @@ namespace cache
 	inline cache::entity_t cached_local_player;
 	inline std::vector<cache::entity_t> cached_players;
 
-
-
-
-
-
+	
+	
+	
+	
+	
 	inline std::atomic<std::uint64_t> cached_local_team{ 0 };
 
-
-
-
-
+	
+	
+	
+	
 	inline std::string cached_local_team_name;
 
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	inline float part_half_height(const math::vector3& size, const math::matrix3& rot)
 	{
 		return 0.5f * (std::fabs(rot.m[3]) * size.x +
@@ -105,26 +105,26 @@ namespace cache
 
 
 
-
-
-
-
+	
+	
+	
+	
 	bool is_teammate(const entity_t& e);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	bool is_dead(const entity_t& e);
 
 	void run();

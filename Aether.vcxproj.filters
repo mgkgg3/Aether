@@ -16,6 +16,9 @@
     <ClCompile Include="src\features\radar\Radar.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\features\fusion\SourcePack.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClInclude Include="src\game\game_context.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -29,6 +32,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\features\radar\Radar.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\features\fusion\SourcePack.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClCompile Include="thirdparty\stb\stb_image_impl.cpp">
@@ -46,12 +52,6 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-      <ClCompile Include="src\features\spotify\Spotify.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClInclude Include="src\features\spotify\Spotify.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
 </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp">

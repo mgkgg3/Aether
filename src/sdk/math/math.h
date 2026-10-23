@@ -59,19 +59,19 @@ namespace math
 			float r[3][3];
 		};
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
 		vector3 right()   const { return {  m[0],  m[3],  m[6] }; }
 		vector3 up()      const { return {  m[1],  m[4],  m[7] }; }
 		vector3 forward() const { return { -m[2], -m[5], -m[8] }; }

@@ -10,11 +10,11 @@
 
 namespace walkspeed
 {
-
-
-
-
-
+	
+	
+	
+	
+	
 	static std::uint64_t find_humanoid_addr(rbx::model_instance_t& model)
 	{
 		try { return model.find_first_child("Humanoid").address; }
@@ -55,8 +55,8 @@ namespace walkspeed
 				key_pressed = true;
 			}
 
-
-
+			
+			
 			live_state::set(live_state::kWalkspeed, settings::walkspeed::enabled && key_pressed);
 
 			if (!settings::walkspeed::enabled || !key_pressed)

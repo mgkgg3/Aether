@@ -155,6 +155,8 @@ static bool is_valid_target(const cache::entity_t& entity, const cache::entity_t
 
 	if (settings::silentaim::teamcheck && cache::is_teammate(entity)) return false;
 
+	// A friend is passed over unless the user named them - in the players tab, or
+	// by whatever player this thread already holds.
 	if (friends::is_skipped(entity.instance.address, targets::get())) return false;
 	if (settings::silentaim::knock_check && is_player_knocked(entity)) return false;
 
@@ -178,6 +180,25 @@ static bool get_part_position(const cache::entity_t& entity, const char* name, m
 	rbx::primitive_t prim = part.get_primitive();
 	if (!prim.address) return false;
 	try { out = prim.get_position(); return true; } catch (...) { return false; }
+}
+
+// The aim point first - that is where the shot goes, so that is what has to be
+// clear - then the body column around it.  A head behind a railing still has a
+// chest, and a vis check that gives up on the exact point alone throws the
+// whole target away for the sake of four centimetres of handrail.
+static bool aim_body_visible(const cache::entity_t& entity, const math::vector3& point)
+{
+	if (aim_point_visible(point))
+		return true;
+
+	math::vector3 head{}, root{};
+	const bool have_head = get_part_position(entity, "Head", head);
+	const bool have_root = get_part_position(entity, "HumanoidRootPart", root);
+
+	if (have_head && have_root && (head - root).length() > 0.5f)
+		return worldgeo::is_body_visible(worldgeo::eye_position(point), head, root);
+
+	return false;
 }
 
 static bool get_target_position(
@@ -351,7 +372,7 @@ static bool get_target_position(
 	{
 		const bool visible = op1::multipoint_los_enabled()
 			? op1::visible_any(entity, out_pos, out_pos)
-			: aim_point_visible(out_pos);
+			: aim_body_visible(entity, out_pos);
 
 		if (!visible)
 			return false;
@@ -668,6 +689,9 @@ static void targeting_thread()
 					new_target = cache::entity_t{};
 			}
 
+			// With a pinned player the mode is focus, not hunt: when they cannot be
+			// resolved the silent aim waits for them instead of throwing at someone
+			// else the user never asked for.
 			if (!new_target.instance.address && targets::get() == 0)
 				new_target = get_closest_to_mouse();
 
@@ -770,6 +794,35 @@ static void aim_application_thread()
 		const auto now        = std::chrono::steady_clock::now();
 
 		update_raycast_subsystems(now);
+
+		// One line every five seconds while the feature is on.  Silent aim is the
+		// quietest thing in the cheat when it works and the quietest when it does
+		// not, so the run says which half it stopped on: no target, no projection,
+		// no camera, or no local player to measure the target against.
+		if (settings::silentaim::enabled)
+		{
+			static auto s_status_log = std::chrono::steady_clock::now() - std::chrono::seconds(6);
+			if (now - s_status_log >= std::chrono::seconds(5))
+			{
+				s_status_log = now;
+
+				std::uint64_t local_addr = 0;
+				int ents = 0;
+				{
+					std::lock_guard<std::mutex> lk(cache::mtx);
+					local_addr = cache::cached_local_player.instance.address;
+					ents = (int)cache::cached_players.size();
+				}
+
+				debug::log("silent", "run | method=%d active=%d target=%s data=%d cam=0x%llx local=0x%llx ents=%d",
+					settings::silentaim::method, active ? 1 : 0,
+					silentaim::state.target.instance.address ? "yes" : "none",
+					silentaim::state.data_ready ? 1 : 0,
+					(unsigned long long)rbx::current_camera_address(),
+					(unsigned long long)local_addr,
+					ents);
+			}
+		}
 
 		if (!active)
 		{
@@ -893,10 +946,11 @@ static void aim_application_thread()
 			}
 			else if (settings::silentaim::method == 0)
 			{
-				std::uint64_t workspace = memory->read<std::uint64_t>(game::datamodel.address + Offsets::DataModel::Workspace);
-				if (!workspace) { std::this_thread::sleep_for(10ms); continue; }
-
-				std::uint64_t camera_addr = memory->read<std::uint64_t>(workspace + Offsets::Workspace::CurrentCamera);
+				// The same resolver the aimbot uses: the field the dump names, or the
+				// Camera child when that field reads empty.  Reading the field here by
+				// hand meant this method failed on its own while the rest of the tree
+				// had a working fallback.
+				const std::uint64_t camera_addr = rbx::current_camera_address();
 				if (!camera_addr) { std::this_thread::sleep_for(10ms); continue; }
 
 				rbx::camera_t cam{ camera_addr };

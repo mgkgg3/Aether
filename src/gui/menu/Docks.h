@@ -118,6 +118,17 @@ namespace docks
 		return settings::docks::animate ? (seconds / sp) : 0.f;
 	}
 
+	// Where a plate is and the tallest it can get, from settings alone.  The
+	// backdrop works out its capture region from this before the docks are drawn,
+	// so it cannot depend on anything this frame's layout produces.
+	inline bool plate_bounds(int i, float& w, float& h)
+	{
+		if (!settings::docks::enabled || !settings::docks::open[i]) return false;
+		w = s(info(i).w);
+		h = s(dim::HeadH + dim::BodyGap + dim::PadBot + 210.f);
+		return true;
+	}
+
 	inline ImU32 a(ImU32 c, float alpha) { return ImGui::GetColorU32(c, alpha); }
 
 	inline void txt(ImDrawList* dl, ImFont* f, ImVec2 p, ImU32 col, const char* t, float alpha)
@@ -142,6 +153,11 @@ namespace docks
 
 		DrawBackdropRect(dl, p0, p1, dim::Rounding);
 		dl->AddRectFilled(p0, p1, a(fill, alpha), dim::Rounding);
+
+		// The same fall of light as the panel, the media card and the keybind
+		// plate - one surface language, not a menu with some panels bolted on.
+		GradV(dl, p0, p1, dim::Rounding,
+			a(IM_COL32(255, 255, 255, 14), alpha), a(IM_COL32(255, 255, 255, 0), alpha));
 
 		const float lift = settings::docks::hover_lift ? ImClamp(hot, 0.f, 1.f) : 0.f;
 		dl->AddRect(p0, p1, a(IM_COL32(255, 255, 255, (int)(26.f + 20.f * lift)), alpha),

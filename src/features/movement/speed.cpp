@@ -13,6 +13,13 @@
 #include <thread>
 #include <chrono>
 
+// CFrame: the position is stepped by hand instead of handing the
+// physics step a velocity.  A client that clamps velocity still accepts a
+// position write, which is why this mode exists at all.
+static math::vector3 s_cf_pos{};
+static bool s_cf_init = false;
+static std::uint64_t s_cf_character = 0;
+
 static void speed_hack()
 {
 	if (cache::cached_local_player.instance.address == 0) return;
@@ -60,6 +67,29 @@ static void speed_hack()
 					memory->write<float>(cache::cached_local_player.humanoid.address + Offsets::Humanoid::WalkspeedCheck, settings::movement::speedhack::speed);
 				}
 		}
+		else if (settings::movement::speedhack::mode == 2)
+		{
+			const std::uint64_t character = cache::cached_local_player.instance.address;
+			if (!s_cf_init || s_cf_character != character)
+			{
+				s_cf_pos = prim.get_position();
+				s_cf_character = character;
+				s_cf_init = true;
+			}
+
+			s_cf_pos.y = prim.get_position().y;
+			const float step = settings::movement::speedhack::speed / 165.f;
+			s_cf_pos.x += dir.x * step;
+			s_cf_pos.z += dir.z * step;
+
+			const math::matrix3 rot = prim.get_rotation();
+			for (int i = 0; i < 1000; i++)
+			{
+				memory->write<math::vector3>(prim.address + Offsets::Primitive::Position, s_cf_pos);
+				memory->write<math::matrix3>(prim.address + Offsets::Primitive::Rotation, rot);
+				memory->write<math::vector3>(prim.address + Offsets::Primitive::AssemblyLinearVelocity, {});
+			}
+		}
 	}
 }
 
@@ -98,6 +128,7 @@ void movement::speed::run()
 		else
 		{
 			was_active = false;
+			s_cf_init = false;
 		}
 	}
 }

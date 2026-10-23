@@ -26,6 +26,7 @@
 #include <features/movement/noclip.h>
 #include <features/movement/jumpcooldown.h>
 #include <features/misc/exploits.h>
+#include <features/fusion/SourcePack.h>
 #include <features/misc/SkyShader.h>
 #include <features/aimbot/aimbot.h>
 #include <features/silentaim/silentaim.h>
@@ -35,6 +36,7 @@
 #include <features/effects/Effects.h>
 #include <features/chams/EngineChams.h>
 #include <features/world/world_effects.h>
+#include <features/world/skybox.h>
 #include <gui/explorer/AetherExplorer.h>
 #include <settings.h>
 
@@ -43,6 +45,8 @@
 std::int32_t main()
 {
 	debug::init_console();
+	// Everything below still lands in the log file; the console itself only
+	// keeps the client, place and attach lines plus warnings and errors.
 	debug::set_quiet(true);
 
 	{
@@ -105,6 +109,8 @@ std::int32_t main()
 			else if (running == Offsets::ClientVersion)
 				debug::ok("running client  -> %s (matches the offsets table)", running.c_str());
 			else
+				// log file only - a client that has moved on from the dumped build is
+				// normal, so it does not belong on the console.
 				debug::info("running client  -> %s (offsets table is %s)",
 					running.c_str(), Offsets::ClientVersion.c_str());
 		}
@@ -183,12 +189,14 @@ std::int32_t main()
 	std::thread(movement::noclip::run).detach(); debug::ok("noclip thread running");
 	std::thread(movement::jumpcooldown::run).detach(); debug::ok("jumpcooldown thread running");
 	std::thread(exploits::run).detach();         debug::ok("exploits thread running");
+	std::thread(fusion::run).detach();           debug::ok("source pack thread running");
 	std::thread(aimbot::run).detach();           debug::ok("aimbot thread running");
 	std::thread(world_effects::run).detach();    debug::ok("world_effects thread running");
 	std::thread(effects::run).detach();          debug::ok("effects thread running (hit feedback)");
 
 	engine_chams::start();                       debug::ok("engine chams thread running");
 	std::thread(skyshader::run).detach();        debug::ok("skyshader thread running");
+	std::thread(skybox::run).detach();           debug::ok("skybox preset thread running");
 
 	std::thread(AutoRescanHandler).detach();     debug::ok("auto-rescan thread running");
 

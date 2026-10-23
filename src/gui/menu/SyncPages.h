@@ -4,6 +4,7 @@
 
 #include <settings.h>
 #include <keybind/keybind.h>
+#include <sdk/offsets.h>
 
 #include <gui/menu/Anim.h>
 #include <gui/menu/AimViz.h>
@@ -20,7 +21,13 @@
 #include <features/esp/BoxFill.h>
 #include <features/misc/HitSounds.h>
 #include <features/misc/SkyVideo.h>
+#include <features/world/skybox.h>
+#include <features/world/SkyPresets.h>
+#include <features/world/world_effects.h>
 #include <features/players/friends.h>
+
+#include <features/chams/EngineChams.h>
+#include <render/Backdrop.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -43,24 +50,76 @@ static inline float RowNameH()
 static void SectionHead(const char* t)
 {
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    g_RowY += (g_RowY > g_ContentTop + 2.f) ? 16.f : 1.f;
-    TxtBold(dl, t, ImVec2(g_ContentL, g_RowY), GC(g_T.textPrimary));
+    const float e = Enh();
+    const float c = Tight();   // Test Enhance: the group's own air comes in too
 
-    g_RowY += RowNameH() + 10.f;
+    if (g_RowY > g_ContentTop + 2.f)
+    {
+        // Every group is separated by a rule and a little air above it, which is
+        // what the reference does - and a header that only changes weight is hard
+        // to read as a new group once the rows are compact, which is exactly when
+        // the separation is worth having.  It used to be drawn only with Enhance
+        // on, so the same page had rules at 100% and none at 0%; the separation is
+        // layout, not a decoration, so it is unconditional now.
+        //
+        // Not for the first group on the page, though: PageHeader already closed
+        // the title with a rule, and a heading sitting between two of them is the
+        // line that has no job - one per page or sub-page, every page.
+        if (g_SectionSeen)
+        {
+            // Space, not a rule.
+            //
+            // Every group used to be closed with a hairline, and on a dark
+            // plate a hairline is a lit line across the whole page - the thing
+            // that reads as "lines in the background" once there are six of
+            // them down a settings page.  The separation is the gap: two steps
+            // of air and a dim caption are enough to start a new group, and
+            // there is then nothing drawn behind the rows at all.
+            const float air = 0.55f + 0.45f * e;
+            g_RowY += 26.f * air * (1.f - 0.45f * c);
+        }
+        else
+        {
+            g_RowY += 16.f * (1.f - 0.40f * c);
+        }
+    }
+    else
+    {
+        g_RowY += 1.f;
+    }
+
+    // A small label, not a bold sentence.  A section heading that is the same
+    // weight and size as a row's name competes with the rows; one step *below*
+    // them - small and a shade dimmer - reads as a caption over the group and
+    // lets the controls stay the loudest thing on the page.  It is also what
+    // makes the rule above it read as a separation rather than as a border.
+    //
+    // Test Enhance sets them in sentence case, the way the reference does: with
+    // more groups on screen at once a row of capitalised words above every one
+    // of them is a second voice on the page.  The roomy layout keeps the small
+    // caps it was designed around.
+    // One step dimmer than the rows and half a point smaller: a heading is an
+    // address, not a title.  It is never capitalised now - eight shouting
+    // labels down a page is the second voice this was reading as.
+    Txt(dl, g_FontSmall, ImVec2(g_ContentL, g_RowY - 1.f),
+        c > 0.5f ? SubText() : GC(g_T.textDim, 0.9f), t);
+    g_SectionSeen = true;
+
+    g_RowY += (g_FontSmall ? g_FontSmall->FontSize : 11.f) + 9.f * (1.f - 0.40f * c);
 }
 
 static void NoteRow(const char* t)
 {
-    Txt(ImGui::GetWindowDrawList(), g_FontSmall, ImVec2(g_ContentL, g_RowY), GC(g_T.textFaint), t);
-    g_RowY += g_FontSmall->FontSize + 9.f;
+    Txt(ImGui::GetWindowDrawList(), g_FontSmall, ImVec2(g_ContentL, g_RowY), NoteText(), Cap8(t));
+    g_RowY += g_FontSmall->FontSize + 9.f * (1.f - 0.40f * Tight());
 }
 
+// A gap between two runs of rows inside one group.  It used to draw a rule as
+// well; the pages that call it are already separated by their headings, and the
+// rule was the last thing left drawing a line behind the content.
 static void DividerRow()
 {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    g_RowY += 5.f;
-    dl->AddLine(ImVec2(g_ContentL, g_RowY), ImVec2(g_ContentR, g_RowY), GC(IM_COL32(255, 255, 255, 14)), 1.f);
-    g_RowY += 13.f;
+    g_RowY += 18.f * (1.f - 0.40f * Tight());
 }
 
 static void PushPopupStyle()
@@ -148,8 +207,6 @@ static bool KeybindControlVk(const char* tag, ImVec2 pos, ImVec2 size, int* key)
     const ImVec2 a = pos, b(pos.x + size.x, pos.y + size.y);
     const float rad = size.y * 0.5f >= 15.f ? g_T.roundControl : size.y * 0.5f;
 
-    AddGlow(dl, a, b, rad, fb.shine, listening ? 8.f : 5.f);
-    AddRipple(dl, a, b, rad, fb.ripple);
     dl->AddRectFilled(a, b, GC(Mix(g_T.controlBg, IM_COL32(255, 255, 255, 40), fb.shine * 0.5f)), rad);
     dl->AddRect(a, b, GC(Mix(g_T.controlBorder, g_T.controlBorderHi, Maxf(fb.shine * 0.8f, hovered ? 0.35f : 0.f))),
                 rad, 0, g_T.borderThickness);
@@ -186,8 +243,11 @@ static bool RowToggleBind(const char* id, const char* label, bool* value, int* k
         ImVec2(tpos.x + K::ToggleW + 12.f, g_RowY + (rowH - g_FontRegular->FontSize) * 0.5f),
         GC(g_T.textPrimary), label);
 
-    const bool show_key = key && !(activation && *activation == 2);
-    if (show_key) RowKeybox("key", g_RowY, rowH, key);
+    // The box is drawn whatever the activation mode says: a bind that is only
+    // ignored while the mode is Always is still a bind to set, and hiding the
+    // box made the two states impossible to get back out of.
+    (void)activation;
+    if (key) RowKeybox("key", g_RowY, rowH, key);
 
     g_RowY += rowH + K::RowGap;
     ImGui::PopID();
@@ -206,7 +266,7 @@ static void RowBind(const char* id, const char* label, const char* desc, int* ke
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float ty = g_RowY + (rowH - textH) * 0.5f;
     TxtBold(dl, label, ImVec2(g_ContentL, ty), GC(g_T.textPrimary));
-    if (desc) Txt(dl, g_FontSmall, ImVec2(g_ContentL, ty + nameH + 3.f), GC(g_T.textDim), desc);
+    if (desc) Txt(dl, g_FontSmall, ImVec2(g_ContentL, ty + nameH + 3.f), SubText(), Cap8(desc));
 
     RowKeybox("key", g_RowY, rowH, key);
 
@@ -256,7 +316,7 @@ static void ColorRow(const char* id, const char* name, const char* desc, float* 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float ty = g_RowY + (rowH - textH) * 0.5f;
     TxtBold(dl, name, ImVec2(g_ContentL, ty), GC(g_T.textPrimary));
-    if (desc) Txt(dl, g_FontSmall, ImVec2(g_ContentL, ty + nameH + 3.f), GC(g_T.textDim), desc);
+    if (desc) Txt(dl, g_FontSmall, ImVec2(g_ContentL, ty + nameH + 3.f), SubText(), Cap8(desc));
 
     const float r = K::SwatchD * 0.5f;
     const ImVec2 center(g_ContentR - r, g_RowY + rowH * 0.5f);
@@ -269,8 +329,6 @@ static void ColorRow(const char* id, const char* name, const char* desc, float* 
     if (pressed) ImGui::OpenPopup("##picker");
 
     const Feedback fb = FeedbackUpdate(hovered, pressed);
-    AddGlow(dl, a, b, r, fb.shine, 7.f);
-    AddRipple(dl, a, b, r, fb.ripple);
     dl->AddCircleFilled(center, r + fb.shine, GC(cur), 48);
     dl->AddCircle(center, r + fb.shine, GC(Mix(g_T.windowBorder, g_T.controlBorderHi, fb.shine)), 48, 1.2f);
 
@@ -333,7 +391,7 @@ static void RowMulti(const char* id, const char* name, const char* desc, unsigne
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float ty = g_RowY + (rowH - textH) * 0.5f;
     TxtBold(dl, name, ImVec2(g_ContentL, ty), GC(g_T.textPrimary));
-    if (desc) Txt(dl, g_FontSmall, ImVec2(g_ContentL, ty + nameH + 3.f), GC(g_T.textDim), desc);
+    if (desc) Txt(dl, g_FontSmall, ImVec2(g_ContentL, ty + nameH + 3.f), SubText(), Cap8(desc));
 
     const ImVec2 a(g_ContentR - K::ComboW, g_RowY + (rowH - K::ComboH) * 0.5f);
     const ImVec2 b(a.x + K::ComboW, a.y + K::ComboH);
@@ -344,7 +402,6 @@ static void RowMulti(const char* id, const char* name, const char* desc, unsigne
     const bool open = ImGui::IsPopupOpen("##popup");
 
     const Feedback fb = FeedbackUpdate(hovered, pressed, open);
-    AddGlow(dl, a, b, g_T.roundControl, fb.shine);
     dl->AddRectFilled(a, b, GC(Mix(g_T.controlBg, IM_COL32(255, 255, 255, 34), fb.shine * 0.55f)), g_T.roundControl);
     dl->AddRect(a, b, GC(Mix(g_T.controlBorder, g_T.controlBorderHi, fb.shine * 0.85f)), g_T.roundControl, 0, g_T.borderThickness);
 
@@ -468,6 +525,56 @@ static const char* const* TracerOrigins()
     return v;
 }
 
+// Every dropdown below names the tree the variant came from, because the
+// variants are not tweaks of one look - they are three different renderers'
+// ideas of the same shape, and "why does this one glow" has an answer.
+static const char* const* FovStyles()
+{
+    static const char* const v[] = { "Ring", "Dots",
+                                     "Dynamic", "Pulse",
+                                     "Arc" };
+    return v;
+}
+
+static const char* const* TracerStyles()
+{
+    static const char* const v[] = { "Plain", "Smooth",
+                                     "Beam", "Laser" };
+    return v;
+}
+
+static const char* const* BulletTracerStyles()
+{
+    static const char* const v[] = { "Streak", "Beam",
+                                     "Laser", "Dots" };
+    return v;
+}
+
+static const char* const* ArrowStyles()
+{
+    static const char* const v[] = { "Chevron", "Arrow",
+                                     "Pointer", "Ring",
+                                     "Orbit" };
+    return v;
+}
+
+static const char* const* SkeletonStyles()
+{
+    // Aether first: it is this tree's own rig, one stroke per limb with the R6
+    // shoulders and hips derived from the torso.  The renderer's older numbering
+    // is mapped in esp.cpp, so a config written by the glow-only build - which
+    // stored 0 because the style was forced - lands on Aether rather than Lines.
+    static const char* const v[] = { "Aether", "Lines", "Joints", "Bones", "Glow" };
+    return v;
+}
+
+static const char* const* RadarStyles()
+{
+    static const char* const v[] = { "Compass", "Bearing",
+                                     "Directional" };
+    return v;
+}
+
 static void DrawAimGlobal()
 {
     static const char* const k_aim_method[] = { "Mouse", "Camera" };
@@ -483,12 +590,24 @@ static void DrawAimGlobal()
                   &settings::aimbot::activation_mode);
     RowCombo("aim_act", "Activation", "Whether the key holds the aim on", &settings::aimbot::activation_mode, ActivationOptions(), 3);
     if (settings::aimbot::activation_mode == 2)
-        NoteRow("Always on - no key needed");
+        NoteRow("Always on - the key is ignored while this is set");
     RowToggle("aim_drawfov", "Draw FOV Circle", &settings::aimbot::draw_fov);
     if (settings::aimbot::draw_fov)
     {
+        if (settings::aimbot::fov_style < 0 || settings::aimbot::fov_style > 4)
+            settings::aimbot::fov_style = 0;
+        RowCombo("aim_fovstyle", "Circle Style", "The same circle drawn by the tree in each entry",
+                 &settings::aimbot::fov_style, FovStyles(), 5);
+        if (settings::aimbot::fov_style == 2)
+            NoteRow("Warm while a player the aim can see is inside the circle, dim otherwise");
+        else if (settings::aimbot::fov_style == 3)
+            NoteRow("Pulse carries no hit information - it is the decorative ring");
         ColorRow("aim_fovcol", "Circle Colour", nullptr, settings::aimbot::fov_circle_colour, true);
-        ColorRow("aim_fovout", "Outline Colour", nullptr, settings::aimbot::fov_outline_colour, true);
+        RowSliderF("aim_fovth", "Thickness", &settings::aimbot::fov_thickness, 0.5f, 6.f, "%.1f px");
+        RowToggle("aim_fovoutline", "Outline", &settings::aimbot::fov_outline);
+        if (settings::aimbot::fov_outline)
+            ColorRow("aim_fovout", "Outline Colour", nullptr, settings::aimbot::fov_outline_colour, true);
+        NoteRow("The outline sits just outside the colour band, so the width you set is the width you get");
         RowToggle("aim_fovfill", "Fill Circle", &settings::aimbot::fov_fill);
         if (settings::aimbot::fov_fill)
         {
@@ -498,10 +617,6 @@ static void DrawAimGlobal()
     }
     RowToggle("aim_instant", "Instant Lock", &settings::aimbot::instant_lock);
     RowToggle("aim_sticky", "Sticky Aim", &settings::aimbot::sticky_aim);
-    RowSliderI("aim_pace", "Aim Step Interval", &settings::aimbot::pace_ms, 0, 32, "%d ms");
-    NoteRow(settings::aimbot::pace_ms > 0
-        ? "How often a mouse step goes out - a game frame is the honest floor"
-        : "0 follows the FPS limit (Config > Settings)");
     RowToggle("aim_usefov", "Use FOV", &settings::aimbot::use_fov);
 
     SectionHead("Targeting");
@@ -532,9 +647,10 @@ static void DrawAimGlobal()
     RowToggle("aim_smooth", "Smoothing", &settings::aimbot::smoothing);
     if (settings::aimbot::smoothing)
     {
-        RowSliderF("aim_smx", "Smoothness X", &settings::aimbot::smoothingx, 0.f, 100.f, "%.0f%%");
-        RowSliderF("aim_smy", "Smoothness Y", &settings::aimbot::smoothingy, 0.f, 100.f, "%.0f%%");
+        RowSliderF("aim_smx", "Smoothness X", &settings::aimbot::smoothingx, 0.f, 100.f, "%.0f");
+        RowSliderF("aim_smy", "Smoothness Y", &settings::aimbot::smoothingy, 0.f, 100.f, "%.0f");
         RowCombo("aim_smstyle", "Smoothing Style", "Curve the aim travels along", &settings::aimbot::smoothing_style, k_styles, 11);
+        NoteRow("0 closes the gap at once, 100 takes about a third of a second");
     }
     RowToggle("aim_pred", "Prediction", &settings::aimbot::enable_prediction);
     if (settings::aimbot::enable_prediction)
@@ -564,7 +680,37 @@ static void DrawAimGlobal()
     if (settings::aimbot::tracer)
     {
         RowCombo("aim_trorigin", "Tracer Origin", nullptr, &settings::aimbot::tracer_origin, TracerOrigins(), 4);
+        RowSliderF("aim_trth", "Thickness", &settings::aimbot::tracer_thickness, 0.5f, 6.f, "%.1f px");
+        RowToggle("aim_troutline", "Outline", &settings::aimbot::tracer_outline);
+        NoteRow("The outline is the same line one pixel wider, so the stroke keeps its own width");
+
+        if (settings::aimbot::tracer_style < 0 || settings::aimbot::tracer_style > 3)
+            settings::aimbot::tracer_style = 0;
+        RowCombo("aim_trstyle", "Style", "Plain line, smooth band, glow stack or travelling dashes",
+                 &settings::aimbot::tracer_style, TracerStyles(), 4);
         ColorRow("aim_trcol", "Tracer Colour", nullptr, settings::aimbot::tracer_color, true);
+    }
+
+    SectionHead("Auto Clicker");
+    RowToggle("aim_ac", "Auto Clicker", &settings::fusion::autoclicker,
+              "A held key becomes clicks - a plain SendInput pair at the set rate");
+    if (settings::fusion::autoclicker)
+    {
+        RowBind("aim_ackey", "Click Key", "Held down while it clicks", &settings::fusion::autoclicker_key);
+        NoteRow("Leave the key unbound and nothing clicks: the left button itself would feed back");
+        RowSliderF("aim_accps", "Clicks Per Second", &settings::fusion::autoclicker_cps, 1.f, 30.f, "%.0f");
+        RowSliderF("aim_acjit", "Jitter", &settings::fusion::autoclicker_jitter, 0.f, 0.9f, "%.2f");
+    }
+
+    SectionHead("Recoil Control");
+    RowToggleBind("aim_norecoil", "Anti-Recoil", &settings::fusion::norecoil,
+                  &settings::fusion::norecoil_key, nullptr);
+    if (settings::fusion::norecoil)
+    {
+        NoteRow("Leave the key unbound to compensate whenever the fire button is down");
+        RowSliderF("aim_norecoilx", "Horizontal", &settings::fusion::norecoil_x, -4.f, 4.f, "%.2f");
+        RowSliderF("aim_norecoily", "Vertical", &settings::fusion::norecoil_y, -4.f, 8.f, "%.2f");
+        RowSliderF("aim_norecoilst", "Strength", &settings::fusion::norecoil_strength, 0.1f, 4.f, "%.2f");
     }
 }
 
@@ -579,13 +725,25 @@ static void DrawAimSilent()
                   &settings::silentaim::activation_mode);
     RowCombo("sa_act", "Activation", nullptr, &settings::silentaim::activation_mode, ActivationOptions(), 3);
     if (settings::silentaim::activation_mode == 2)
-        NoteRow("Always on - no key needed");
+        NoteRow("Always on - the key is ignored while this is set");
     RowCombo("sa_method", "Method", "How the shot is redirected", &settings::silentaim::method, k_methods, 5);
     RowToggle("sa_drawfov", "Draw FOV", &settings::silentaim::draw_fov);
     if (settings::silentaim::draw_fov)
+        RowToggle("sa_fovattach", "Attach FOV To Target", &settings::silentaim::attach_fov_to_target,
+                  "The circle follows the body being aimed at instead of the pointer");
+    if (settings::silentaim::draw_fov)
     {
+        if (settings::silentaim::fov_style < 0 || settings::silentaim::fov_style > 4)
+            settings::silentaim::fov_style = 0;
+        RowCombo("sa_fovstyle", "Circle Style", "The same circle drawn by the tree in each entry",
+                 &settings::silentaim::fov_style, FovStyles(), 5);
+        if (settings::silentaim::fov_style == 2)
+            NoteRow("Warm while a player the silent aim can see is inside the circle");
         ColorRow("sa_fovcol", "Circle Colour", nullptr, settings::silentaim::fov_circle_colour, true);
-        ColorRow("sa_fovout", "Outline Colour", nullptr, settings::silentaim::fov_outline_colour, true);
+        RowSliderF("sa_fovth", "Thickness", &settings::silentaim::fov_thickness, 0.5f, 6.f, "%.1f px");
+        RowToggle("sa_fovoutline", "Outline", &settings::silentaim::fov_outline);
+        if (settings::silentaim::fov_outline)
+            ColorRow("sa_fovout", "Outline Colour", nullptr, settings::silentaim::fov_outline_colour, true);
         RowToggle("sa_fovfill", "Fill Circle", &settings::silentaim::fov_fill);
         if (settings::silentaim::fov_fill)
         {
@@ -633,12 +791,6 @@ static void DrawAimSilent()
         ColorRow("sa_dotcol", "Dot Colour", nullptr, settings::silentaim::target_dot_color, true);
         RowSliderF("sa_dotsize", "Dot Size", &settings::silentaim::target_dot_size, 1.f, 12.f, "%.1f");
     }
-    RowToggle("sa_curvetracer", "Draw Curve Tracer", &settings::silentaim::draw_curve_tracer);
-    if (settings::silentaim::draw_curve_tracer)
-    {
-        ColorRow("sa_curvetcol", "Tracer Colour", nullptr, settings::silentaim::curve_tracer_color, true);
-        RowSliderF("sa_curvetth", "Tracer Thickness", &settings::silentaim::curve_tracer_thickness, 0.5f, 6.f, "%.1f px");
-    }
 }
 
 static void DrawAimTrigger()
@@ -651,10 +803,16 @@ static void DrawAimTrigger()
     RowToggleBind("tb_enabled", "Enable Triggerbot", &settings::triggerbot::enabled, &settings::triggerbot::keybind,
                   &settings::triggerbot::activation_mode);
     RowCombo("tb_act", "Activation", nullptr, &settings::triggerbot::activation_mode, ActivationOptions(), 3);
+    if (settings::triggerbot::activation_mode == 2)
+        NoteRow("Always on - the key is ignored while this is set");
     RowCombo("tb_target", "Target", "Any part, or the crosshair on the head / torso", &settings::triggerbot::target_part, k_targets, 3);
     RowToggle("tb_cont", "Continuous Fire", &settings::triggerbot::continuous);
     RowToggle("tb_vis", "Visibility Check", &settings::triggerbot::visibility_check);
     RowToggle("tb_gun", "Gun Check", &settings::triggerbot::gun_check);
+    RowToggle("tb_aimcheck", "Scope Check", &settings::triggerbot::aim_check,
+              "Fire only while you are aiming (right mouse button)");
+    RowToggle("tb_holdfire", "Skip While Firing", &settings::triggerbot::skip_while_firing,
+              "Stand down while you hold fire yourself - an injected click over your burst cancels it");
     RowToggle("tb_team", "Team Check", &settings::triggerbot::team_check);
     RowToggle("tb_knock", "Knock Check", &settings::triggerbot::knock_check);
     RowToggle("tb_dead", "Dead Check", &settings::triggerbot::dead_check);
@@ -667,8 +825,15 @@ static void DrawAimTrigger()
     RowToggle("tb_drawtol", "Draw Tolerance", &settings::triggerbot::draw_fov);
     if (settings::triggerbot::draw_fov)
     {
+        if (settings::triggerbot::fov_style < 0 || settings::triggerbot::fov_style > 4)
+            settings::triggerbot::fov_style = 0;
+        RowCombo("tb_tolstyle", "Circle Style", "The same circle drawn by the tree in each entry",
+                 &settings::triggerbot::fov_style, FovStyles(), 5);
         ColorRow("tb_tolcol", "Circle Colour", nullptr, settings::triggerbot::fov_circle_colour, true);
-        ColorRow("tb_tolout", "Outline Colour", nullptr, settings::triggerbot::fov_outline_colour, true);
+        RowSliderF("tb_tolth", "Thickness", &settings::triggerbot::fov_thickness, 0.5f, 6.f, "%.1f px");
+        RowToggle("tb_toloutline", "Outline", &settings::triggerbot::fov_outline);
+        if (settings::triggerbot::fov_outline)
+            ColorRow("tb_tolout", "Outline Colour", nullptr, settings::triggerbot::fov_outline_colour, true);
         RowToggle("tb_tolfill", "Fill Circle", &settings::triggerbot::fov_fill);
         if (settings::triggerbot::fov_fill)
         {
@@ -829,6 +994,8 @@ static void DrawEspPreview(ImVec2 mn, ImVec2 mx, float alpha)
     if (sync::hooks().preview_rig) sync::hooks().preview_rig(rig);
     const bool live = rig.valid;
 
+    // One source for both the rig and the picture so the two can never
+    // disagree about who is on screen.
     const long long shown_uid = live ? rig.user_id : 0;
 
     const int info_rows = (settings::visuals::movement_status ? 1 : 0)
@@ -856,6 +1023,9 @@ static void DrawEspPreview(ImVec2 mn, ImVec2 mx, float alpha)
     const ImVec2 head = proj.ok ? proj.p[(int)sync::PreviewJoint::Head]
                                 : ImVec2(scx, f0.y + side * 0.28f);
 
+    // A player is tall and narrow. The frame used to be the whole square figure
+    // box, which is what made the preview box look squashed - fall back to a
+    // player-proportioned rect, and let Dynamic take the real pose extremes.
     const float def_w = side * 0.42f;
     ImVec2 b0(scx - def_w * 0.5f, f0.y - 4.f), b1(scx + def_w * 0.5f, f1.y + 4.f);
     if (live && proj.ok && settings::visuals::box_mode == 1)
@@ -876,6 +1046,8 @@ static void DrawEspPreview(ImVec2 mn, ImVec2 mx, float alpha)
     {
         dl->PushClipRect(mn, mx, true);
 
+        // The thumbnail is a square 420x420 render, so the slot has to be square
+        // too - handing it a short rect is what squashed the face in the preview.
         const ImVec2 bust0(f0.x, f0.y), bust1(f1.x, f1.y);
         sync::hooks().preview_avatar(dl, shown_uid, bust0, bust1, GC(IM_COL32(255, 255, 255, 175), alpha));
 
@@ -1097,6 +1269,9 @@ static bool ChooseImageFile()
     char path[MAX_PATH]{};
     snprintf(path, sizeof path, "%s", settings::visuals::box_fill_image_path);
 
+    // The picker runs its own modal loop on this thread, so the overlay would
+    // freeze mid-frame on top of the dialog - the panel could neither be used nor
+    // dismissed. Hide it for the duration and give the dialog the window as owner.
     HWND overlay = g_hwnd;
     const bool hide = overlay != nullptr && ::IsWindow(overlay) != FALSE &&
                       ::IsWindowVisible(overlay) != FALSE;
@@ -1174,6 +1349,8 @@ static void DrawVisualsBody()
         if (settings::visuals::box_type < 0 || settings::visuals::box_type > 1)
             settings::visuals::box_type = 0;
         RowCombo("v_boxtype", "Box Type", nullptr, &settings::visuals::box_type, k_box_type, 2);
+        if (settings::visuals::box_type == 1)
+            RowSliderF("v_boxcorner", "Corner Length", &settings::visuals::box_corner_scale, 0.05f, 0.5f, "%.2f");
         RowCombo("v_boxmode", "Box Mode", "Static holds its shape, Dynamic tracks the pose", &settings::visuals::box_mode, k_box_mode, 2);
         ColorRow("v_boxcol", "Box Colour", nullptr, settings::visuals::box_color, true);
         RowSliderF("v_boxth", "Box Thickness", &settings::visuals::box_thickness, 0.5f, 6.f, "%.1f px");
@@ -1183,6 +1360,8 @@ static void DrawVisualsBody()
             RowCombo("v_fillmode", "Fill Type", nullptr, &settings::visuals::box_fill_mode, k_fill_mode, 2);
             if (settings::visuals::box_fill_mode == 1)
             {
+                // Either action changes the pixels the overlay holds: a new file,
+                // or the same file with its background keyed out.
                 const bool bg_hit   = RowToggle("v_fillbg", "Remove Background", &settings::visuals::box_fill_remove_bg);
                 const bool new_file = BoxFillImageRow();
                 if (bg_hit || new_file)
@@ -1196,18 +1375,43 @@ static void DrawVisualsBody()
                 ColorRow("v_fillcol", "Fill Colour", nullptr, settings::visuals::box_fill_color, true);
             }
         }
+        RowToggle("v_boxhpcol", "Health Colour", &settings::visuals::box_health_color,
+                  "The frame takes the health bar's green/amber/red ramp instead of one fixed colour");
+        RowToggle("v_boxteamcol", "Team Colour", &settings::visuals::box_team_color,
+                  "The frame takes the player's own team colour");
         RowToggle("v_boxgrad", "Box Gradient", &settings::visuals::box_gradient);
         if (settings::visuals::box_gradient)
         {
             ColorRow("v_gradtop", "Gradient Top", nullptr, settings::visuals::box_gradient_top, true);
             ColorRow("v_gradbot", "Gradient Bottom", nullptr, settings::visuals::box_gradient_bottom, true);
         }
+        static const char* const k_boxstyle[] = { "Plain", "Shadow", "Double" };
+        if (settings::visuals::box_style < 0 || settings::visuals::box_style > 2)
+            settings::visuals::box_style = 0;
+        RowCombo("v_boxstyle", "Finish",
+                 "A second box under or inside the first - the shape stays the one Box Type picked",
+                 &settings::visuals::box_style, k_boxstyle, 3);
         RowToggle("v_bodyonly", "Body Only (skip hulls)", &settings::visuals::box_body_only);
     }
 
     RowToggle("v_skeleton", "Skeleton", &settings::visuals::skeleton);
     if (settings::visuals::skeleton)
     {
+        if (settings::visuals::skeleton_style < 0 || settings::visuals::skeleton_style > 4)
+            settings::visuals::skeleton_style = 0;
+        RowCombo("v_skstyle", "Style",
+                 "Aether is this tree's own rig - one stroke per limb, joints as bends",
+                 &settings::visuals::skeleton_style, SkeletonStyles(), 5);
+        if (settings::visuals::skeleton_style == 2)
+        {
+            RowToggle("v_skjoints", "Joint Dots", &settings::visuals::skeleton_joints);
+            if (settings::visuals::skeleton_joints)
+                RowSliderF("v_skjointsz", "Joint Size", &settings::visuals::skeleton_joint_size,
+                           0.5f, 8.f, "%.1f px");
+            if (settings::visuals::visible_check)
+                RowSliderI("v_skseg", "Visibility Segments", &settings::visuals::skeleton_vis_segments,
+                           1, 24, "%d");
+        }
         ColorRow("v_skcol", "Skeleton Colour", nullptr, settings::visuals::skeleton_color, true);
         RowSliderF("v_skth", "Thickness", &settings::visuals::skeleton_thickness, 0.5f, 6.f, "%.1f px");
         RowToggle("v_skanim", "Animate Limbs", &settings::visuals::skeleton_animate);
@@ -1220,6 +1424,13 @@ static void DrawVisualsBody()
     RowToggle("v_chinahat", "China Hat", &settings::visuals::china_hat);
     if (settings::visuals::china_hat)
     {
+        static const char* const k_hat_styles[] = {
+            "Cone", "Ribbed", "Pinwheel" };
+        if (settings::visuals::china_hat_style < 0 || settings::visuals::china_hat_style > 2)
+            settings::visuals::china_hat_style = 0;
+        RowCombo("v_hatstyle", "Hat Style",
+                 "A flat cone, a stitched cone with ribs and a brim ring, or alternating segments",
+                 &settings::visuals::china_hat_style, k_hat_styles, 3);
         ColorRow("v_hatcol", "Hat Colour", nullptr, settings::visuals::china_hat_color, true);
         RowSliderF("v_hatheight", "Hat Height", &settings::visuals::china_hat_height, 0.3f, 3.f, "%.2f");
         RowSliderF("v_hatradius", "Hat Radius", &settings::visuals::china_hat_radius, 0.4f, 3.5f, "%.2f");
@@ -1236,12 +1447,13 @@ static void DrawVisualsBody()
             ColorRow("v_headdotoutcol", "Outline Colour", nullptr, settings::visuals::head_dot_outline_color, true);
     }
     RowToggle("v_lookdir", "Look Direction", &settings::visuals::look_direction,
-              "A line out of the head along the rig's own forward vector");
+              "A small arrow out of the head along the rig's own forward vector");
     if (settings::visuals::look_direction)
     {
-        ColorRow("v_lookdircol", "Line Colour", nullptr, settings::visuals::look_direction_color, true);
-        RowSliderF("v_lookdirlen", "Line Length", &settings::visuals::look_direction_length, 0.2f, 8.f, "%.2f studs");
-        RowSliderF("v_lookdirth", "Line Thickness", &settings::visuals::look_direction_thickness, 0.5f, 6.f, "%.1f px");
+        ColorRow("v_lookdircol", "Arrow Colour", nullptr, settings::visuals::look_direction_color, true);
+        RowSliderF("v_lookdirlen", "Arrow Length", &settings::visuals::look_direction_length, 0.2f, 8.f, "%.2f studs");
+        NoteRow("Length is in screen pixels; the world distance only sets the direction");
+        RowSliderF("v_lookdirth", "Arrow Thickness", &settings::visuals::look_direction_thickness, 0.5f, 6.f, "%.1f px");
     }
 
     SectionHead("Filtering");
@@ -1281,7 +1493,8 @@ static void DrawVisualsInfo()
     static const char* const k_name_style[] = { "Display Name", "Username" };
     static const char* const k_units[] = { "Studs", "Meters" };
 
-    static const char* const k_esp_fonts[] = { "Body", "Caption", "Medium", "Heading", "ImGui", "Display", "Clear", "Inter" };
+    static const char* const k_esp_fonts[] = { "Body", "Caption", "Medium", "Heading", "ImGui",
+                                              "Display", "Clear", "Inter", "Inter Medium", "Inter Title" };
 
     PageHeader("Visuals", "Player and world ESP.", nullptr);
 
@@ -1315,10 +1528,27 @@ static void DrawVisualsInfo()
     RowToggle("vi_flags", "Draw Flags", &settings::visuals::flags);
     if (settings::visuals::flags)
         ColorRow("vi_flagcol", "Flag Colour", nullptr, settings::visuals::flags_state_colour, true);
-    if (settings::visuals::esp_font < 0 || settings::visuals::esp_font > 7)
+    if (settings::visuals::esp_font < 0 || settings::visuals::esp_font > 9)
         settings::visuals::esp_font = 7;
-    RowCombo("vi_font", "ESP Font", nullptr, &settings::visuals::esp_font, k_esp_fonts, 8);
+    RowCombo("vi_font", "ESP Font", "Which loaded face the names, distances and flags are drawn in",
+             &settings::visuals::esp_font, k_esp_fonts, 10);
     RowSliderF("vi_fontsize", "ESP Font Size", &settings::visuals::esp_font_size, 8.f, 24.f, "%.0f");
+
+    SectionHead("Curve Tracer");
+    static const char* const k_curve_targets[] = { "Silent Aim Target", "Closest Player" };
+    RowToggle("ct_on", "Draw Curve Tracer", &settings::silentaim::draw_curve_tracer,
+              "A smooth arc from the cursor to the target, drawn under the player");
+    if (settings::silentaim::draw_curve_tracer)
+    {
+        RowCombo("ct_target", "Target", nullptr, &settings::silentaim::curve_tracer_target, k_curve_targets, 2);
+        NoteRow(settings::silentaim::curve_tracer_target == 1
+            ? "Points at the nearest player to the cursor - draws with silent aim off"
+            : "Points at silent aim's own target, so it only draws while silent aim has one");
+        ColorRow("ct_colour", "Colour", nullptr, settings::silentaim::curve_tracer_color, true);
+        RowSliderF("ct_thick", "Thickness", &settings::silentaim::curve_tracer_thickness, 0.5f, 8.f, "%.1f px");
+        RowToggle("ct_outline", "Outline", &settings::silentaim::curve_tracer_outline);
+        NoteRow("The outline is the same curve a pixel wider under the colour - off leaves the colour alone on the scene");
+    }
 
     SectionHead("Combat Tags");
     RowToggle("vi_movestatus", "Movement Status", &settings::visuals::movement_status);
@@ -1331,13 +1561,22 @@ static void DrawVisualsInfo()
         if (settings::visuals::health_percent)
             ColorRow("vi_hppctcol", "Percent Colour", nullptr, settings::visuals::health_percent_color, true);
 
-        RowToggle("vi_hpenh", "Enhanced Bar", &settings::visuals::healthbar_enhanced, "Rounded, with a shadow and a bright head");
-        if (settings::visuals::healthbar_enhanced)
-        {
-            RowSliderF("vi_hpwidth", "Bar Width", &settings::visuals::healthbar_width, 2.f, 24.f, "%.0f px");
-            RowSliderF("vi_hpopacity", "Bar Opacity", &settings::visuals::healthbar_opacity, 0.f, 100.f, "%.0f %%");
-            RowToggle("vi_hpglow", "Bar Glow", &settings::visuals::healthbar_glow);
-        }
+        static const char* const k_hpstyles[] = {
+            "Flat", "Framed", "Pill", "Backed" };
+        if (settings::visuals::healthbar_style < 0 || settings::visuals::healthbar_style > 3)
+            settings::visuals::healthbar_style = 0;
+        RowCombo("vi_hpstyle", "Bar Style",
+                 "Square strip, framed gradient, rounded pill, or a fat black backing",
+                 &settings::visuals::healthbar_style, k_hpstyles, 4);
+        RowToggle("vi_hpenh", "Enhanced Bar", &settings::visuals::healthbar_enhanced,
+                  "Adds the bright head to the fill");
+        RowSliderF("vi_hpwidth", "Bar Width", &settings::visuals::healthbar_width, 2.f, 24.f, "%.0f px");
+        RowSliderF("vi_hpopacity", "Bar Opacity", &settings::visuals::healthbar_opacity, 0.f, 100.f, "%.0f %%");
+        RowToggle("vi_hpglow", "Bar Glow", &settings::visuals::healthbar_glow);
+        RowToggle("vi_armorbar", "Armour Bar", &settings::visuals::armorbar,
+                  "A second gauge above the health strip");
+        if (settings::visuals::armorbar)
+            ColorRow("vi_armorcol", "Armour Colour", nullptr, settings::visuals::armorbar_color, true);
     }
     RowToggle("vi_hptext", "Health Text", &settings::visuals::health_text);
     if (settings::visuals::health_text)
@@ -1347,13 +1586,9 @@ static void DrawVisualsInfo()
 
     SectionHead("On-Screen");
     RowToggle("vi_kbdock", "Keybind Dock", &sync::state().kb_show,
-              "A plate listing the features that have a key bound");
-    if (sync::state().kb_show)
-        NoteRow("Position and the activation column: Config > Menu, under HUD");
+              "Bound features, with their keys");
     RowToggle("vi_targethud", "Target HUD", &sync::state().th_show,
-              "Name, health and tool of whoever the aim is holding");
-    if (sync::state().th_show)
-        NoteRow("Fields, position and scale: Config > Menu, under HUD");
+              "Name, health and tool of the target");
 
     SectionHead("Aim Line");
     RowToggle("vi_aimline", "Aim Line", &settings::visuals::aim_line,
@@ -1367,6 +1602,10 @@ static void DrawVisualsInfo()
         RowToggle("vi_aimline_from", "From Centre", &settings::visuals::aim_line_centre);
         if (!settings::visuals::aim_line_centre)
             NoteRow("The line starts at the cursor instead");
+        RowToggle("vi_aimline_silent", "Follow Silent Aim", &settings::visuals::aim_line_silent,
+                  "Draws to the silent aim's target too, not only the aimbot's");
+        if (settings::visuals::aim_line_silent)
+            NoteRow("While silent aim is off this changes nothing - there is no target to follow then");
     }
 }
 
@@ -1381,6 +1620,25 @@ static void DrawVisualsOverlay()
     if (settings::visuals::tracer)
     {
         RowCombo("vo_trorigin", "Tracer Origin", nullptr, &settings::visuals::tracer_origin, TracerOrigins(), 4);
+
+        static const char* const k_tracer_end[] = { "Feet", "Centre", "Head" };
+        RowCombo("vo_trend", "Tracer End", "Where on the target the line lands",
+                 &settings::visuals::tracer_end, k_tracer_end, 3);
+        NoteRow("Feet is the bottom of the box - the one a top-down camera reads correctly, "
+                "where a line to the head appears to hang over the body");
+        RowSliderF("vo_trth", "Thickness", &settings::visuals::tracer_thickness, 0.5f, 6.f, "%.1f px");
+        RowToggle("vo_troutline", "Outline", &settings::visuals::tracer_outline);
+
+        if (settings::visuals::tracer_style < 0 || settings::visuals::tracer_style > 3)
+            settings::visuals::tracer_style = 0;
+        RowCombo("vo_trstyle", "Style", "Each entry is the renderer from that tree",
+                 &settings::visuals::tracer_style, TracerStyles(), 4);
+        if (settings::visuals::tracer_style == 1)
+            NoteRow("Smooth thins and fades the line toward the target and rounds both its ends");
+        else if (settings::visuals::tracer_style == 2)
+            NoteRow("Beam is a glow stack: wide and faint under a narrow core");
+        else if (settings::visuals::tracer_style == 3)
+            NoteRow("Laser draws travelling dashes, so the line reads as a direction");
         ColorRow("vo_trcol", "Line Colour", nullptr, settings::visuals::tracer_color, true);
     }
 
@@ -1388,6 +1646,13 @@ static void DrawVisualsOverlay()
     RowToggle("vo_arrows", "Offscreen Arrows", &settings::visuals::offscreen_arrows);
     if (settings::visuals::offscreen_arrows)
     {
+        if (settings::visuals::arrow_style < 0 || settings::visuals::arrow_style > 4)
+            settings::visuals::arrow_style = 0;
+        RowCombo("vo_arrowstyle", "Arrow Style",
+                 "Chevron, shafted arrow, slim pointer, bearing ring, or one riding the FOV circle",
+                 &settings::visuals::arrow_style, ArrowStyles(), 5);
+        RowToggle("vo_arrowfov", "Use FOV Radius", &settings::visuals::arrow_use_fov_radius,
+                  "Sits the arrows on the aim circle's own radius instead of the Arrow Radius row");
         ColorRow("vo_arrowcol", "Arrow Colour", nullptr, settings::visuals::arrow_color, true);
         RowSliderF("vo_arrowsize", "Arrow Size", &settings::visuals::arrow_size, 6.f, 32.f, "%.0f px");
         RowSliderF("vo_arrowradius", "Arrow Radius", &settings::visuals::arrow_radius, 40.f, 500.f, "%.0f px");
@@ -1416,29 +1681,66 @@ static void DrawVisualsOverlay()
 
 static void DrawVisualsBodyExtras()
 {
-    SectionHead("Engine Chams");
+        SectionHead("Engine Chams");
     RowToggle("v_echams", "Engine Chams", &settings::visuals::engine_chams,
               "Restyles the engine's render clusters - scene wide, through walls");
     if (settings::visuals::engine_chams)
     {
-        static const char* const k_styles[] = { "Through Walls", "Ghost", "Wireframe", "Mesh",
-                                                "Charwire", "Glass", "Glaze", "Smoke",
-                                                "Depth", "Hologram" };
-        if (settings::visuals::engine_chams_style < 0 || settings::visuals::engine_chams_style > 9)
+        // The style list is the feature's, not this page's: each entry is a
+        // shader program family the client was measured to have, and the ones
+        // it has no program for never reach the menu.
+        static const char* s_styles[32] = {};
+        static int         s_style_count = 0;
+        if (s_style_count == 0)
+        {
+            s_style_count = engine_chams::style_count();
+            if (s_style_count > 32) s_style_count = 32;
+            for (int i = 0; i < s_style_count; ++i)
+                s_styles[i] = engine_chams::style_name(i);
+        }
+
+        static char s_desc[96];
+        snprintf(s_desc, sizeof s_desc,
+                 "the client's shader list: %d program(s)", engine_chams::programs_loaded());
+
+        if (settings::visuals::engine_chams_style < 0 ||
+            settings::visuals::engine_chams_style >= s_style_count)
             settings::visuals::engine_chams_style = 0;
-        RowCombo("v_echamstyle", "Style", nullptr, &settings::visuals::engine_chams_style, k_styles, 10);
+        RowCombo("v_echamstyle", "Style", s_desc,
+                 &settings::visuals::engine_chams_style, s_styles, s_style_count);
         ColorRow("v_echamcol", "Colour", nullptr, settings::visuals::engine_chams_color, true);
+
+        // What this style is reaching on this place: a pass can only be swapped
+        // for a program the same vertex format is set up for, and how many of
+        // those the scene has is a number only the client can give.
+        const int style = settings::visuals::engine_chams_style;
+        if (style > 0)
+        {
+            char reach[128];
+            snprintf(reach, sizeof reach, "reaches %d pass(es) of %d cluster(s), %d swapped",
+                     engine_chams::style_reach(style), engine_chams::stats().entities,
+                     engine_chams::style_swapped(style));
+            StatusRow("this style", reach, engine_chams::style_reach(style) > 0);
+            NoteRow("A pass is only swapped for a program the same vertex format is set up for");
+        }
+        else
+        {
+            NoteRow("No swap: the materials are left exactly as they are");
+        }
     }
 
-    SectionHead("Normal Chams");
+SectionHead("Normal Chams");
     RowToggle("v_nchams", "Normal Chams", &settings::visuals::nchams);
     if (settings::visuals::nchams)
     {
-        static const char* const k_nmodes[] = { "Box", "Box Filled", "Clipper", "Shader" };
-        if (settings::visuals::nchams_mode < 0 || settings::visuals::nchams_mode > 3)
+        static const char* const k_nmodes[] = {
+            "Box", "Box Filled", "Hull",
+            "Shader", "Chains", "Rig" };
+        if (settings::visuals::nchams_mode < 0 || settings::visuals::nchams_mode > 5)
             settings::visuals::nchams_mode = 0;
-        RowCombo("v_nchamode", "Mode", "Edges, hulls, one union silhouette, or a shader",
-                 &settings::visuals::nchams_mode, k_nmodes, 4);
+        RowCombo("v_nchamode", "Mode",
+                 "Per-part edges, fills, a union hull, the shader or a per-part rig",
+                 &settings::visuals::nchams_mode, k_nmodes, 6);
 
         ColorRow("v_nchamout", "Outline Colour", nullptr, settings::visuals::nchams_outline_color, true);
         if (settings::visuals::nchams_mode >= 1)
@@ -1453,6 +1755,14 @@ static void DrawVisualsBodyExtras()
         RowToggle("v_nchamcore", "Inner Fill", &settings::visuals::nchams_inner_fill, "A solid core inside the silhouette");
         if (settings::visuals::nchams_inner_fill)
             RowSliderF("v_nchamcores", "Inner Scale", &settings::visuals::nchams_inner_fill_scale, 5.f, 100.f, "%.0f %%");
+
+        if (settings::visuals::nchams_mode == 4)
+        {
+            RowToggle("v_nchampulse", "Pulse", &settings::visuals::nchams_pulse,
+                      "Breathes the fill in and out");
+            if (settings::visuals::nchams_pulse)
+                RowSliderF("v_nchampulses", "Pulse Speed", &settings::visuals::nchams_pulse_speed, 0.1f, 6.f, "%.1f");
+        }
 
         if (settings::visuals::nchams_mode == 3)
         {
@@ -1512,6 +1822,10 @@ static void DrawVisualsMap()
             settings::visuals::radar_position = 0;
         RowCombo("vm_radarpos", "Position", nullptr, &settings::visuals::radar_position, k_radar_corner, 4);
         RowCombo("vm_radarshape", "Shape", nullptr, &settings::visuals::radar_shape, k_radar_shape, 2);
+        if (settings::visuals::radar_style < 0 || settings::visuals::radar_style > 2)
+            settings::visuals::radar_style = 0;
+        RowCombo("vm_radarstyle", "Style", "Compass, bearing spokes to every contact, or a ticked directional dial",
+                 &settings::visuals::radar_style, RadarStyles(), 3);
         RowSliderF("vm_radarsize", "Radar Size", &settings::visuals::radar_size, 60.f, 320.f, "%.0f px");
         RowSliderI("vm_radarrange", "Range", &settings::visuals::radar_range, 40, 800, "%d studs");
         RowSliderF("vm_radarop", "Background", &settings::visuals::radar_opacity, 0.25f, 1.f, "%.2f");
@@ -1584,8 +1898,10 @@ static const char* kMiscSubs[] = { "Movement", "Physics", "Effects", "Utility" }
 
 static void DrawMiscMovement()
 {
-    static const char* const k_speed_mode[] = { "Velocity", "Humanoid" };
-    static const char* const k_fly_mode[] = { "Velocity", "Position", "Position Lock" };
+    static const char* const k_speed_mode[] = {
+        "Velocity", "Humanoid", "CFrame" };
+    static const char* const k_fly_mode[] = {
+        "Velocity", "Position", "Position Lock", "Glide" };
 
     PageHeader("Misc", "Movement & utility tweaks.", nullptr);
 
@@ -1598,12 +1914,28 @@ static void DrawMiscMovement()
         RowSliderF("m_wsspeed", "Speed", &settings::walkspeed::speed, 1.f, 500.f, "%.0f");
     }
 
+    SectionHead("Peek Return");
+    RowToggle("m_peek", "Peek Return", &settings::fusion::peek_return,
+              "Remembers where you stood and walks you back there");
+    if (settings::fusion::peek_return)
+    {
+        RowBind("m_peekkey", "Peek Key", "The spot is saved when this goes down", &settings::fusion::peek_key);
+        static const char* const k_peek_trigger[] = { "Key Release", "Left Click" };
+        RowCombo("m_peektrig", "Return On", "What sends you back", &settings::fusion::peek_trigger, k_peek_trigger, 2);
+        RowSliderF("m_peekspd", "Return Speed", &settings::fusion::peek_speed, 5.f, 400.f, "%.0f");
+        RowToggle("m_peeksave", "Save On Hold", &settings::fusion::peek_save_on_hold);
+        NoteRow("Velocity writes, stopped dead a stud and a half from the spot");
+    }
+
     SectionHead("Speed Hack");
     RowToggleBind("m_sh", "Enable Speed", &settings::movement::speedhack::enabled, &settings::movement::speedhack::keybind,
                   &settings::movement::speedhack::activation_mode);
     if (settings::movement::speedhack::enabled)
     {
-        RowCombo("m_shmode", "Mode", nullptr, &settings::movement::speedhack::mode, k_speed_mode, 2);
+        if (settings::movement::speedhack::mode < 0 || settings::movement::speedhack::mode > 2)
+            settings::movement::speedhack::mode = 0;
+        RowCombo("m_shmode", "Mode", "CFrame steps position by hand - for a client that clamps velocity",
+                 &settings::movement::speedhack::mode, k_speed_mode, 3);
         RowCombo("m_shact", "Activation", nullptr, &settings::movement::speedhack::activation_mode, ActivationOptions(), 3);
         RowSliderF("m_shspeed", "Speed", &settings::movement::speedhack::speed, 1.f, 500.f, "%.0f");
     }
@@ -1613,10 +1945,62 @@ static void DrawMiscMovement()
                   &settings::movement::flyhack::activation_mode);
     if (settings::movement::flyhack::enabled)
     {
-        RowCombo("m_flymode", "Mode", nullptr, &settings::movement::flyhack::mode, k_fly_mode, 3);
+        if (settings::movement::flyhack::mode < 0 || settings::movement::flyhack::mode > 3)
+            settings::movement::flyhack::mode = 0;
+        RowCombo("m_flymode", "Mode", "Glide keeps momentum and never pins the character",
+                 &settings::movement::flyhack::mode, k_fly_mode, 4);
         RowCombo("m_flyact", "Activation", nullptr, &settings::movement::flyhack::activation_mode, ActivationOptions(), 3);
         RowSliderF("m_flyspeed", "Fly Speed", &settings::movement::flyhack::speed, 1.f, 500.f, "%.0f");
     }
+
+    SectionHead("Source Movement");
+    RowToggle("m_antifling", "Anti-Fling", &settings::fusion::antifling,
+              "catches the frame the assembly velocity leaves the legal band and pins the root back");
+    if (settings::fusion::antifling)
+    {
+        RowSliderF("m_antiflinglin", "Trigger Speed", &settings::fusion::antifling_lin, 40.f, 2000.f, "%.0f studs/s");
+        RowSliderF("m_antiflingang", "Trigger Spin", &settings::fusion::antifling_ang, 20.f, 2000.f, "%.0f rad/s");
+    }
+
+    RowToggleBind("m_freecam", "Freecam", &settings::fusion::freecam,
+                  &settings::fusion::freecam_key, &settings::fusion::freecam_mode);
+    if (settings::fusion::freecam)
+    {
+        RowCombo("m_freecamact", "Activation", nullptr, &settings::fusion::freecam_mode, ActivationOptions(), 3);
+        RowSliderF("m_freecamspeed", "Speed", &settings::fusion::freecam_speed, 5.f, 400.f, "%.0f studs/s");
+        RowSliderF("m_freecamsprint", "Sprint (Shift)", &settings::fusion::freecam_sprint, 10.f, 800.f, "%.0f studs/s");
+        RowToggle("m_freecamrevert", "Return To Character", &settings::fusion::freecam_revert,
+                  "puts the camera position back when the freecam is released");
+        NoteRow("WASD to move, Space / E up, Ctrl / Q down, Shift to sprint - the character stays put");
+    }
+
+    RowToggleBind("m_orbit", "Orbit", &settings::fusion::orbit,
+                  &settings::fusion::orbit_key, &settings::fusion::orbit_activation);
+    if (settings::fusion::orbit)
+    {
+        RowCombo("m_orbitact", "Activation", nullptr, &settings::fusion::orbit_activation, ActivationOptions(), 3);
+        static const char* const k_orbit_target[] = { "Nearest Player", "Aim Target" };
+        RowCombo("m_orbittarget", "Orbit Around", nullptr, &settings::fusion::orbit_target, k_orbit_target, 2);
+        RowSliderF("m_orbitradius", "Radius", &settings::fusion::orbit_radius, 1.f, 40.f, "%.1f studs");
+        RowSliderF("m_orbitspeed", "Speed", &settings::fusion::orbit_speed, 0.1f, 20.f, "%.1f");
+        RowSliderF("m_orbitheight", "Height Offset", &settings::fusion::orbit_height, -20.f, 20.f, "%.1f");
+        RowToggle("m_orbitspectate", "Look At Target", &settings::fusion::orbit_spectate,
+                  "Writes CameraSubject while the orbit runs");
+    }
+
+    RowToggle("m_spectate", "Spectate", &settings::fusion::spectate,
+              "points the camera at another player and leaves it there");
+    if (settings::fusion::spectate)
+    {
+        RowBind("m_spectatekey", "Cycle Key", nullptr, &settings::fusion::spectate_cycle_key);
+        NoteRow("Follows the pinned aim target when there is one, otherwise walks the roster with the key");
+        NoteRow("The camera type and subject are put back when this is switched off");
+    }
+
+    RowToggle("m_flyabove", "Fly Above", &settings::fusion::flyabove,
+              "rides the selected player from overhead");
+    if (settings::fusion::flyabove)
+        RowSliderF("m_flyaboveh", "Height", &settings::fusion::flyabove_height, 2.f, 60.f, "%.0f studs");
 }
 
 static void DrawMiscPhysics()
@@ -1647,6 +2031,32 @@ static void DrawMiscPhysics()
     RowToggle("m_gravity", "Low Gravity", &settings::exploits::low_gravity);
     if (settings::exploits::low_gravity)
         RowSliderF("m_gravityval", "Gravity", &settings::exploits::gravity_value, 0.f, 196.2f, "%.1f");
+
+    SectionHead("Character Tuning");
+    RowToggleBind("m_jumppower", "Jump Power", &settings::fusion::jumppower,
+                  &settings::fusion::jumppower_key, &settings::fusion::jumppower_mode);
+    if (settings::fusion::jumppower)
+    {
+        RowCombo("m_jumppoweract", "Activation", nullptr, &settings::fusion::jumppower_mode, ActivationOptions(), 3);
+        RowSliderF("m_jumppowerv", "Power", &settings::fusion::jumppower_value, 10.f, 500.f, "%.0f");
+        NoteRow("Writes JumpPower and UseJumpPower together; the original pair is restored when this is off");
+    }
+
+    RowToggle("m_hipheight", "Hip Height", &settings::fusion::hipheight);
+    if (settings::fusion::hipheight)
+    {
+        RowSliderF("m_hipheightv", "Height", &settings::fusion::hipheight_value, 0.f, 20.f, "%.2f");
+        NoteRow("The original hip height is put back when the switch goes off");
+    }
+
+    RowToggle("m_korblox", "Korblox Legs", &settings::fusion::korblox,
+              "hides the right foot and lower leg on the local rig only");
+    if (settings::fusion::korblox)
+        NoteRow("Local parts only - the server and other players still see the normal legs; restored on off");
+
+    RowToggle("m_headless", "Headless", &settings::fusion::headless);
+    if (settings::fusion::headless)
+        NoteRow("Local head primitive only, restored on off - the server still sees the normal rig");
 }
 
 static void DrawMiscEffects()
@@ -1654,6 +2064,12 @@ static void DrawMiscEffects()
     static const char* const k_lines[] = { "Damage", "Health", "Distance" };
 
     PageHeader("Misc", "Movement & utility tweaks.", nullptr);
+
+    SectionHead("Hit Notifications");
+    RowToggle("me_hitnotes", "Damage Toast", &settings::fusion::hit_notifications,
+              "a slide-in card per landed hit, top right");
+    if (settings::fusion::hit_notifications)
+        RowSliderF("me_hitnotesdur", "Hold", &settings::fusion::hit_notification_seconds, 1.f, 8.f, "%.1f s");
 
     SectionHead("Hit Marker");
     RowToggle("me_marker", "Hitmarker", &settings::effects::hitmarker);
@@ -1665,9 +2081,13 @@ static void DrawMiscEffects()
         ColorRow("me_markerhead", "Head Colour", nullptr, settings::effects::hitmarker_head_color, true);
 
         static const char* const k_marker_styles[] =
-            { "Classic", "Cross", "Chevron", "Ring", "Star", "Bracket" };
-        RowCombo("me_markerstyle", "Marker Style", "Which shape the marker is drawn as",
-                 &settings::effects::hitmarker_style, k_marker_styles, 6);
+            { "Classic", "Cross", "Chevron", "Ring",
+              "Star", "Bracket", "Diamond",
+              "Square", "Burst" };
+        if (settings::effects::hitmarker_style < 0 || settings::effects::hitmarker_style > 8)
+            settings::effects::hitmarker_style = 0;
+        RowCombo("me_markerstyle", "Marker Style", "Which shape the marker is drawn as - each new entry is that tree's own",
+                 &settings::effects::hitmarker_style, k_marker_styles, 9);
         RowSliderF("me_markerpop", "Pop", &settings::effects::hitmarker_pop, 0.f, 2.f, "%.2f");
         RowSliderF("me_markerglow", "Halo", &settings::effects::hitmarker_glow, 0.f, 1.f, "%.2f");
 
@@ -1709,6 +2129,9 @@ static void DrawMiscEffects()
     SectionHead("Hit Sound");
     RowToggle("me_hitsound", "Hit Sound", &settings::effects::hitsound);
     if (settings::effects::hitsound)
+        RowToggle("me_soundhead", "Headshots Only", &settings::effects::hitsound_head_only,
+                  "Only ring when the hit landed on the head");
+    if (settings::effects::hitsound)
     {
         const int count = hitsounds::count();
         if (count > 0)
@@ -1724,6 +2147,48 @@ static void DrawMiscEffects()
         }
         RowSliderF("me_soundvol", "Volume", &settings::effects::hitsound_volume, 0.f, 100.f, "%.0f%%");
         if (RowButton("me_soundplay", "Preview")) hitsounds::play(settings::effects::hitsound_index);
+    }
+
+    SectionHead("Bullet Tracers");
+    RowToggle("me_tracer", "Bullet Tracers", &settings::effects::tracers,
+              "A streak from the muzzle to the point the shot landed on, spawned by the same "
+              "health drop the hitmarker reads - so only shots that connected draw one");
+    if (settings::effects::tracers)
+    {
+        static const char* const k_tracer_modes[] = { "On Hit", "Every Shot" };
+        RowCombo("me_tracermode", "Draw Tracers", "On Hit needs the shot to land, Every Shot draws as the muzzle fires",
+                 &settings::effects::tracer_mode, k_tracer_modes, 2);
+        NoteRow(settings::effects::tracer_mode == 1
+            ? "A muzzle streak towards the crosshair on every click"
+            : "A line from the muzzle to the point the bullet landed on");
+
+        if (settings::effects::tracer_mode == 1)
+        {
+            RowSliderF("me_tracerlen", "Streak Length", &settings::effects::tracer_length, 40.f, 400.f, "%.0f px");
+            NoteRow("How far the streak reaches from the muzzle");
+        }
+
+        if (settings::effects::tracer_style < 0 || settings::effects::tracer_style > 3)
+            settings::effects::tracer_style = 0;
+        RowCombo("me_tracerstyle", "Tracer Style", "Streak, glow stack, travelling dashes or a bead trail",
+                 &settings::effects::tracer_style, BulletTracerStyles(), 4);
+        ColorRow("me_tracercol", "Colour", nullptr, settings::effects::tracer_color, true);
+        RowToggle("me_tracerrainbow", "Rainbow", &settings::effects::tracer_rainbow);
+        if (settings::effects::tracer_rainbow)
+            RowSliderF("me_tracerrspeed", "Cycle Speed", &settings::effects::tracer_rainbow_speed, 0.05f, 2.f, "%.2f");
+
+        RowSliderF("me_tracerdur", "Duration", &settings::effects::tracer_duration, 0.1f, 5.f, "%.2f s");
+        RowSliderF("me_tracerthick", "Thickness", &settings::effects::tracer_thickness, 0.5f, 8.f, "%.1f px");
+        RowSliderF("me_tracerglow", "Glow", &settings::effects::tracer_glow, 0.f, 1.f, "%.2f");
+        RowToggle("me_tracerfade", "Fade Out", &settings::effects::tracer_fade);
+        RowToggle("me_traceroutline", "Outline", &settings::effects::tracer_outline);
+
+        RowToggle("me_tracerimpact", "Impact Mark", &settings::effects::tracer_impact);
+        if (settings::effects::tracer_impact)
+            RowSliderF("me_tracerimpsize", "Mark Size", &settings::effects::tracer_impact_size, 1.f, 16.f, "%.1f px");
+
+        RowToggle("me_tracertool", "From The Muzzle", &settings::effects::tracer_from_tool,
+                  "Leaves the holding hand when it can be found; off draws it from the camera");
     }
 
     SectionHead("Crosshair");
@@ -1856,6 +2321,15 @@ static void DrawMiscUtility()
         RowToggle("tr_team", "Team Check", &settings::visuals::trail_team_check);
     }
 
+    SectionHead("Anti-AFK");
+    RowToggle("mf_antiafk", "Anti-AFK", &settings::fusion::antiafk,
+              "Resets the idle clock with one pixel of cursor movement");
+    if (settings::fusion::antiafk)
+    {
+        RowSliderF("mf_afkidle", "Idle Before Nudge", &settings::fusion::antiafk_idle, 5.f, 300.f, "%.0f s");
+        NoteRow("Nothing is written to the client - not the FFlag the reference patches");
+    }
+
     SectionHead("Text Sheen");
     NoteRow("The band of light that travels across a name while it is drawn");
     RowToggle("sh_name", "Name Sheen", &settings::visuals::name_sheen);
@@ -1939,6 +2413,10 @@ static void DrawMiscUtility()
                   "Skip anything the geometry says is behind a wall");
         NoteRow("Only what the geometry cache can see is marked at full strength");
     }
+
+    SectionHead("Overlay Readout");
+    RowToggle("mf_fps", "Frame Rate", &settings::fusion::show_fps,
+              "the overlay's own frame rate, top-left of the client, drawn whether or not the menu is open");
 }
 
 static void DrawMiscPage()
@@ -1957,7 +2435,7 @@ static const char* kWorldSubs[] = { "Lighting", "Atmosphere", "Weather", "Post F
 
 static void DrawWorldLighting()
 {
-    PageHeader("World", "World, lighting and environment.", nullptr);
+    PageHeader("World", "Skybox, FOV & lighting", nullptr);
 
     SectionHead("Time");
     RowToggle("w_time", "Time Changer", &settings::world::lighting::time_on);
@@ -2015,12 +2493,29 @@ static void DrawWorldAtmosphere()
 {
     static const char* const k_skybox[] = { "Crystal", "Liquid", "Aurora", "Video" };
 
-    PageHeader("World", "World, lighting and environment.", nullptr);
+    PageHeader("World", "Skybox, FOV & lighting", nullptr);
 
     SectionHead("Atmosphere");
     RowToggle("wa_on", "Override Atmosphere", &settings::world::atmosphere::enabled);
+
+    // Which of the two paths this place gets: the Atmosphere instance itself,
+    // or - where the place has none, which is the usual case for a game that
+    // removed it - the same rows standing in on the Lighting's fog.  Without
+    // this line "the atmosphere does nothing" has no answer on the page.
     if (settings::world::atmosphere::enabled)
     {
+        if (!world_effects::atmosphere_found())
+        {
+            StatusRow("instance", "none in this place", false);
+            NoteRow(world_effects::atmosphere_on_fog()
+                ? "No Atmosphere here, so these rows drive the fog"
+                : "No Atmosphere here. Turn Fog off to let these rows replace it");
+        }
+        else
+        {
+            StatusRow("instance", world_effects::atmosphere_on_fog() ? "on the fog" : "found", true);
+        }
+
         RowSliderF("wa_density", "Density", &settings::world::atmosphere::density, 0.f, 1.f, "%.2f");
         RowSliderF("wa_offset", "Offset", &settings::world::atmosphere::offset, 0.f, 1.f, "%.2f");
         RowSliderF("wa_haze", "Haze", &settings::world::atmosphere::haze, 0.f, 10.f, "%.2f");
@@ -2036,36 +2531,71 @@ static void DrawWorldAtmosphere()
     RowToggle("wa_rainbow", "Rainbow", &settings::world::presets::rainbow);
     RowToggle("wa_fogpulse", "Fog Pulse", &settings::world::presets::fog_pulse);
 
-    SectionHead("Skybox");
-    RowToggle("wa_skyslots", "Sun & Moon Size", &settings::world::sky_slots::enabled);
+    SectionHead("Sun & Moon");
+    RowToggle("wa_skyslots", "Override Size", &settings::world::sky_slots::enabled,
+              "Replaces both angular sizes on the place's Sky");
     if (settings::world::sky_slots::enabled)
     {
         RowSliderF("wa_sunang", "Sun Size", &settings::world::sky_slots::sun_angular, 0.f, 60.f, "%.1f");
         RowSliderF("wa_moonang", "Moon Size", &settings::world::sky_slots::moon_angular, 0.f, 60.f, "%.1f");
-        RowSliderF("wa_orix", "Orient X", &settings::world::sky_slots::orientation[0], -180.f, 180.f, "%.1f");
-        RowSliderF("wa_oriy", "Orient Y", &settings::world::sky_slots::orientation[1], -180.f, 180.f, "%.1f");
-        RowSliderF("wa_oriz", "Orient Z", &settings::world::sky_slots::orientation[2], -180.f, 180.f, "%.1f");
     }
-    RowToggle("wa_skyon", "Enable Skybox", &settings::skybox::enabled);
-    RowCombo("wa_skyshader", "Sky Shader", "Crystal, liquid, aurora or an animated clip",
-             &settings::skybox::shader, k_skybox, 4);
-    if (settings::skybox::shader == 3)
+
+    // ---- the preset catalog ----
+    //
+    // The two catalog files as one list - every sky is six faces plus the sun
+    // and moon textures and the three celestial numbers - applied to the place's
+    // own Sky rather than drawn over it: the client lights and renders the map
+    // under this one, so the sun, the shadows and the fog all come from it.  The
+    // halves are separate switches because they fail for different reasons - the
+    // numbers always land, a face is written inside the string the place keeps
+    // for it, as the full asset URL where that string has the room and as the
+    // bare id where it is still the small-string buffer - and the line under
+    // them says how the last apply went.
+    SectionHead("Skybox");
+    RowToggle("wa_skyon", "Skybox", &settings::skybox::enabled,
+              "Puts the place's own Sky into one of the presets");
+    if (settings::skybox::enabled)
     {
-        SkyVideo::Ensure();
-        const std::vector<std::string> clips = SkyVideo::List();
-        if (clips.empty())
+        static std::vector<const char*> preset_names;
+        if (preset_names.empty())
+            for (int i = 0; i < sky_presets::k_count; ++i)
+                preset_names.push_back(sky_presets::k_presets[i].name);
+
+        if (settings::skybox::preset < 0 || settings::skybox::preset >= sky_presets::k_count)
+            settings::skybox::preset = 0;
+
+        RowCombo("sb_preset", "Preset", nullptr, &settings::skybox::preset,
+                 preset_names.data(), (int)preset_names.size());
+
+        RowToggle("sb_faces", "Sky Faces", &settings::skybox::preset_faces,
+                  "The six cube faces");
+        RowToggle("sb_sunmoon", "Sun & Moon Textures", &settings::skybox::preset_sun_moon);
+        RowToggle("sb_prestars", "Stars & Sizes", &settings::skybox::preset_stars,
+                  "The star count and both angular sizes");
+        RowToggle("sb_celestial", "Hide Sun & Moon", &settings::skybox::hide_celestial);
+
+        RowToggle("sb_stars", "Custom Stars", &settings::skybox::stars_on);
+        if (settings::skybox::stars_on)
+            RowSliderI("sb_starsc", "Star Count", &settings::skybox::stars_count, 0, 5000, "%d");
+
+        RowToggle("sb_orient_on", "Fixed Rotation", &settings::skybox::orientation_on);
+        if (settings::skybox::orientation_on && !settings::skybox::rotate_on)
+            RowSliderF("sb_ori", "Angle", &settings::skybox::orientation[0], -180.f, 180.f, "%.1f");
+
+        RowToggle("sb_rot", "Rotate Sky", &settings::skybox::rotate_on);
+        if (settings::skybox::rotate_on)
         {
-            NoteRow("No clips available");
+            RowSliderF("sb_rotspd", "Speed", &settings::skybox::rotate_speed, -180.f, 180.f, "%.0f deg/s");
+            NoteRow("Rotating overrides the fixed angle");
         }
-        else
+
+        NoteRow(skybox::status());
+
+        if (RowButton("sb_restore", "Reset Sky"))
         {
-            std::vector<const char*> names;
-            names.reserve(clips.size());
-            for (const std::string& c : clips) names.push_back(c.c_str());
-            if (settings::skybox::video < 0 || settings::skybox::video >= (int)names.size())
-                settings::skybox::video = 0;
-            RowCombo("wa_skyclip", "Clip", "Generated in-process - nothing to install",
-                     &settings::skybox::video, names.data(), (int)names.size());
+            skybox::release();
+            settings::skybox::enabled = false;
+            PushToast("sky restored", true);
         }
     }
 }
@@ -2076,7 +2606,7 @@ static void DrawWorldWeather()
     static const char* const k_level[] = { "Off", "Original", "V2", "V3", "V4" };
     static const char* const k_storm[] = { "Off", "Storm", "Storm V2" };
 
-    PageHeader("World", "World, lighting and environment.", nullptr);
+    PageHeader("World", "Skybox, FOV & lighting", nullptr);
 
     SectionHead("Weather");
     RowCombo("ww_storm", "Storm", "Sets rain, wind, fog and lighting", &settings::world::effects_3d::storm_mode, k_storm, 3);
@@ -2110,7 +2640,16 @@ static void DrawWorldWeather()
 
 static void DrawWorldPostFx()
 {
-    PageHeader("World", "World, lighting and environment.", nullptr);
+    PageHeader("World", "Skybox, FOV & lighting", nullptr);
+
+    SectionHead("Camera");
+    RowToggle("wp_camfov", "Camera FOV", &settings::fusion::camera_fov,
+              "Writes the camera's own field of view, and restores it on off");
+    if (settings::fusion::camera_fov)
+    {
+        RowSliderF("wp_camfovval", "Field Of View", &settings::fusion::camera_fov_value, 1.f, 120.f, "%.0f");
+        NoteRow("Re-read on every respawn; the value found first is the one put back");
+    }
 
     SectionHead("Bloom & Rays");
     RowToggle("wp_bloom", "Bloom", &settings::world::postfx::bloom::enabled);
@@ -2153,7 +2692,7 @@ static void DrawWorldPostFx()
 
 static void DrawWorldShaders()
 {
-    PageHeader("World", "World, lighting and environment.", nullptr);
+    PageHeader("World", "Skybox, FOV & lighting", nullptr);
 
     SectionHead("Screen Shaders");
     RowToggle("ws_vignette", "Vignette", &settings::world::shaders::vignette);
@@ -2262,7 +2801,7 @@ static ImU32 PlayerHealthColour(float hp, float maxhp)
 
 static void PlayerFace(ImDrawList* dl, const sync::PlayerRow& r, ImVec2 mn, ImVec2 mx)
 {
-    dl->AddRectFilled(mn, mx, GC(IM_COL32(255, 255, 255, 12)), 10.f);
+    dl->AddRectFilled(mn, mx, GC(SlateFill(12.f, 26)), 10.f);
     bool drew = false;
     if (r.user_id > 0 && sync::hooks().player_avatar)
         drew = sync::hooks().player_avatar(dl, r.user_id, mn, mx, GC(IM_COL32(255, 255, 255, 255)));
@@ -2391,7 +2930,7 @@ static void DrawPlayersPage()
         const float av = 104.f;
         const ImVec2 a0(cx0 + 14.f, topY + 14.f);
         const ImVec2 a1(a0.x + av, a0.y + av);
-        dl->AddRectFilled(a0, a1, GC(IM_COL32(255, 255, 255, 12)), 10.f);
+        dl->AddRectFilled(a0, a1, GC(SlateFill(12.f, 26)), 10.f);
         bool drew = false;
         if (picked->user_id > 0 && sync::hooks().player_avatar)
             drew = sync::hooks().player_avatar(dl, picked->user_id, a0, a1, GC(IM_COL32(255, 255, 255, 255)));
@@ -2471,6 +3010,9 @@ static void DrawPlayersPage()
                       is_friend ? "unfriend" : "friend"))
     {
         const bool now_friend = friends::toggle(picked->instance);
+        // Friending the player the aim is pinned to has to drop the pin: the pin
+        // outranks the friend flag everywhere, so leaving it set would keep the aim
+        // features on someone the user just marked as off limits.
         if (now_friend && locked && sync::hooks().player_target)
             sync::hooks().player_target(0ULL);
         PushToast(is_friend ? "friend removed" : "marked as friend", true);
@@ -2641,30 +3183,84 @@ static void DrawConfigConfigs()
 
 static void DrawConfigSettings()
 {
-    PageHeader("Config", "Keybind, HUD and the plates.", nullptr);
+    PageHeader("Config", "Keys, surface and frame.", nullptr);
+
+    // The page is a list of switches, not a manual.  Every row says what it
+    // does in its own name where it can; the captions that are left are short
+    // enough to read in a glance, because a settings page with a paragraph
+    // under each row is a page nobody finishes.
 
     SectionHead("Menu");
-    RowBind("cfg_menukey", "Menu Key", "Opens and closes this panel", &sync::state().menu_key);
+    RowBind("cfg_menukey", "Menu Key", nullptr, &sync::state().menu_key);
     RowToggle("cfg_wmhide", "Hide Watermark", &settings::menu::hide_watermark);
-    NoteRow("Hides the little HUD card in the corner");
+    RowToggle("cfg_ignoreplace", "Skip Place Warning",
+              &settings::menu::ignore_unsupported_place);
+
+    SectionHead("Interface");
+    RowToggle("cfg_clicks", "Click Sounds", &settings::misc_ui::click_sounds);
+    if (settings::misc_ui::click_sounds)
+        RowSliderF("cfg_clickvol", "Volume", &settings::misc_ui::click_volume, 0.f, 100.f, "%.0f %%");
+    RowToggle("cfg_streamproof", "Hide From Captures", &settings::streamproof::enabled,
+              "Omitted from screenshots and streams");
+
+    SectionHead("Surface");
+    // Only while this section is drawn does the glass borrow the capture
+    // exclusion, so a change to the blur is visible while it is made.
+    sync::note_backdrop_settings();
+
+    {
+        static const char* kSurface[] = { "Solid", "Glass + Blur" };
+        const int current = settings::appearance::no_transparency ? 0 : 1;
+        int pick = current;
+        RowCombo("if_surface", "Material", nullptr, &pick, kSurface, 2);
+        if (pick != current)
+        {
+            settings::appearance::no_transparency = (pick == 0);
+            if (pick == 1)
+            {
+                settings::backdrop::enabled   = true;
+                settings::backdrop::tint_only = false;
+                // A glass plate with the capture at zero has nothing to sample,
+                // and silently falls back to a flat wash.
+                if (settings::backdrop::capture_cap < 0.5f)
+                    settings::backdrop::capture_cap = 100.f;
+            }
+        }
+    }
+
+    if (!settings::appearance::no_transparency)
+    {
+        RowSliderF("if_blurv", "Blur", &settings::backdrop::blur, 0.f, 100.f, "%.0f");
+        RowSliderF("if_tint", "Tint", &settings::backdrop::tint, 0.f, 100.f, "%.0f");
+        RowToggle("if_tintonly", "Tint Only", &settings::backdrop::tint_only);
+    }
+
+    RowToggle("if_panelglow", "Panel Light", &settings::ui21::panel_glow,
+              "Accent light across the main menu");
+
+    SectionHead("HUD");
+    RowToggle("cfg_kbdock", "Keybind Dock", &sync::state().kb_show);
+    if (sync::state().kb_show)
+        RowToggle("cfg_kbactive", "Only Active Binds", &sync::state().kb_only_active);
+
+    RowToggle("cfg_thud", "Target HUD", &sync::state().th_show);
+    if (sync::state().th_show)
+    {
+        RowToggle("cfg_thavatar", "Avatar", &sync::state().th_avatar);
+        RowToggle("cfg_thname", "Name", &sync::state().th_name);
+        RowToggle("cfg_thhp", "Health Bar", &sync::state().th_health);
+        RowToggle("cfg_thtool", "Tool", &sync::state().th_tool);
+        RowSliderF("cfg_thscale", "Scale", &sync::state().th_scale, 0.7f, 1.6f, "%.2f x");
+    }
 
     SectionHead("Frame");
-    RowToggle("cfg_vsync", "V-Sync", &settings::menu::vsync,
-              "Present on the display's own rate; the FPS limit is ignored while it is on");
+    RowToggle("cfg_vsync", "V-Sync", &settings::menu::vsync);
     RowSliderI("cfg_fpslimit", "FPS Limit", &settings::menu::fps_limit, 0, 480, "%d fps");
-    NoteRow(settings::menu::fps_limit > 0
-        ? "Caps the overlay's frames; the aim sizes its mouse steps from this number"
-        : "0 = uncapped - the aim then falls back to one step every 4 ms");
     RowToggle("cfg_perfmode", "Performance Mode", &settings::menu::performance_mode,
-              "Yields half a millisecond of every frame to the game");
+              "Yields part of each frame to the game");
 
-    SectionHead("Places");
-    RowToggle("cfg_ignoreplace", "Ignore Unsupported Place",
-              &settings::menu::ignore_unsupported_place,
-              "Skips the warning popup on every place that is not the supported one");
-
-    SectionHead("Draggable plates");
-    RowToggle("dk_on", "Enable Plates", &settings::docks::enabled, "The HUD surfaces beside the panel");
+    SectionHead("Plates");
+    RowToggle("dk_on", "Enable Plates", &settings::docks::enabled);
     if (settings::docks::enabled)
     {
         static const char* const k_dock_names[] = { "Session", "Nearby", "Sonar" };
@@ -2676,21 +3272,20 @@ static void DrawConfigSettings()
         }
         RowSliderF("dk_op", "Opacity", &settings::docks::opacity, 0.35f, 1.f, "%.2f");
         RowSliderF("dk_scale", "Scale", &settings::docks::scale, 0.75f, 1.5f, "%.2f x");
-        RowToggle("dk_snap", "Edge Snap", &settings::docks::snap, "Magnetic screen edges on release");
+        RowToggle("dk_snap", "Edge Snap", &settings::docks::snap);
         if (settings::docks::snap)
         {
             RowSliderF("dk_snap_px", "Snap Range", &settings::docks::snap_px, 4.f, 64.f, "%.0f px");
             RowSliderF("dk_snap_gap", "Snap Margin", &settings::docks::snap_gap, 0.f, 48.f, "%.0f px");
         }
-        RowToggle("dk_lift", "Hover Edge", &settings::docks::hover_lift, "The plate's edge brightens under the pointer");
-        RowToggle("dk_fold", "Fold on Click", &settings::docks::fold_on_click);
-        RowToggle("dk_anim", "Animate", &settings::docks::animate, "Open, fold and snap motion");
+        RowToggle("dk_lift", "Hover Edge", &settings::docks::hover_lift);
+        RowToggle("dk_fold", "Fold On Click", &settings::docks::fold_on_click);
+        RowToggle("dk_anim", "Animate", &settings::docks::animate);
         if (settings::docks::animate)
             RowSliderF("dk_anim_s", "Motion Speed", &settings::docks::anim_speed, 0.5f, 2.f, "%.2f x");
-        RowToggle("dk_titles", "Caption", &settings::docks::show_titles, "The plate's own name in its header");
-        NoteRow("Plates drag with the left mouse button, with the panel open or shut");
+        RowToggle("dk_titles", "Caption", &settings::docks::show_titles);
 
-        if (RowButton("dk_reset", "Reset plate positions"))
+        if (RowButton("dk_reset", "Reset Plate Positions"))
         {
             static const float kx[settings::docks::kCount] = { 260.f, 16.f, 300.f };
             static const float ky[settings::docks::kCount] = { 232.f, 232.f, 232.f };
@@ -2708,8 +3303,65 @@ static void DrawConfigAppearance()
 {
     sync::Hooks& h = sync::hooks();
 
-    PageHeader("Config", "Palette and accent.", nullptr);
+    PageHeader("Appearance", "Type, accent and surface.", nullptr);
 
+    // ---- type -----------------------------------------------------------
+    // A family list, not a size list: the sizes are the layout's, and a menu
+    // that lets each face pick its own ladder is a menu that reflows every
+    // time the type changes.  The picker only chooses the letterforms.
+    SectionHead("Typeface");
+    if (settings::misc_ui::menu_font < 0 || settings::misc_ui::menu_font >= aether::fonts::kFaceCount)
+        settings::misc_ui::menu_font = 0;
+
+    {
+        static const char* const kTypeNames[] = {
+            "Inter", "Geist", "Segoe UI", "Trebuchet",
+            "Verdana", "Tahoma", "Consolas", "Cascadia Mono"
+        };
+        RowCombo("cfg_typeface", "Font", "Every label in the panel",
+                 &settings::misc_ui::menu_font, kTypeNames, aether::fonts::kFaceCount);
+    }
+
+    // ---- accent ---------------------------------------------------------
+    SectionHead("Accent");
+    const bool accent_on = RowToggle("cfg_accent", "Custom Accent",
+                                     &settings::appearance::custom_accent);
+    if (accent_on && h.theme_apply)
+        h.theme_apply(settings::theme::index);
+
+    if (settings::appearance::custom_accent)
+    {
+        const float was[4] = { settings::appearance::accent[0], settings::appearance::accent[1],
+                               settings::appearance::accent[2], settings::appearance::accent[3] };
+        ColorRow("cfg_accentcol", "Colour", nullptr, settings::appearance::accent, true);
+        const bool moved = was[0] != settings::appearance::accent[0] ||
+                           was[1] != settings::appearance::accent[1] ||
+                           was[2] != settings::appearance::accent[2] ||
+                           was[3] != settings::appearance::accent[3];
+        if (moved && h.theme_apply)
+            h.theme_apply(settings::theme::index);
+
+        // The spread is the panel's light, not its controls: the nav pill, the
+        // switches and the sliders are the accent whatever this says.
+        RowSliderF("cfg_accentspread", "Spread", &settings::appearance::accent_spread, 0.f, 1.f, "%.2f");
+    }
+
+    // ---- surface --------------------------------------------------------
+    SectionHead("Surface");
+    // Width is its own control: the reference is a narrow column, and the panel
+    // at 900 px is already a step in from where it was, so this is the half
+    // step either side of that.
+    RowSliderF("cfg_panelwidth", "Width", &settings::appearance::panel_width, 0.85f, 1.15f, "%.2f x");
+    RowToggle("cfg_testenh", "Compact Layout", &settings::appearance::test_enhance);
+    if (settings::appearance::no_transparency)
+        RowSliderF("cfg_panelcontrast", "Panel Lift", &settings::appearance::panel_contrast, 0.6f, 1.8f, "%.2f x");
+
+    SectionHead("Rendering");
+    RowToggle("cfg_aa", "Anti-Aliasing", &settings::appearance::antialiasing);
+    if (settings::appearance::antialiasing)
+        RowSliderF("cfg_aaq", "Smoothing", &settings::appearance::aa_quality, 0.5f, 2.f, "%.2f x");
+
+    // ---- palette --------------------------------------------------------
     SectionHead("Palette");
     const int theme_count = h.theme_count ? h.theme_count() : 0;
     if (theme_count > 0 && h.theme_name)
@@ -2718,21 +3370,63 @@ static void DrawConfigAppearance()
         theme_names.reserve(theme_count);
         for (int i = 0; i < theme_count; ++i) theme_names.push_back(h.theme_name(i));
         const int before = settings::theme::index;
-        RowCombo("cfg_theme", "Palette", "Used by the overlay's own widgets",
-                 &settings::theme::index, theme_names.data(), theme_count);
+        RowCombo("cfg_theme", "Theme", nullptr, &settings::theme::index,
+                 theme_names.data(), theme_count);
         if (settings::theme::index != before && h.theme_apply)
             h.theme_apply(settings::theme::index);
     }
-    if (RowToggle("cfg_accent", "Custom Accent", &settings::appearance::custom_accent))
+
+    // ---- elements -------------------------------------------------------
+    SectionHead("Elements");
+    RowToggle("cfg_bg", "Draw Elements", &settings::appearance::bg_enabled);
+    if (settings::appearance::bg_enabled)
     {
-        if (h.theme_apply) h.theme_apply(settings::theme::index);
-    }
-    if (settings::appearance::custom_accent)
-    {
-        const float was[4] = { settings::appearance::accent[0], settings::appearance::accent[1], settings::appearance::accent[2], settings::appearance::accent[3] };
-        ColorRow("cfg_accentcol", "Accent", nullptr, settings::appearance::accent, true);
-        const bool accent_moved = was[0] != settings::appearance::accent[0] || was[1] != settings::appearance::accent[1] || was[2] != settings::appearance::accent[2] || was[3] != settings::appearance::accent[3];
-        if (accent_moved && h.theme_apply) h.theme_apply(settings::theme::index);
+        static const char* const k_bg_effects[] =
+            { "None", "Snow", "Rain", "Stars", "Bokeh", "Matrix Rain", "Embers",
+              "Confetti", "Aurora", "Neon Grid", "Glass Tiles", "Topography" };
+        RowCombo("cfg_bgeffect", "Element", nullptr,
+                 &settings::appearance::bg_effect, k_bg_effects, 12);
+
+        const bool falling = settings::appearance::bg_effect == 2 ||
+                             settings::appearance::bg_effect == 5;
+        if (falling)
+        {
+            static const char* const k_bg_dirs[] =
+                { "Down", "Diagonal Left", "Diagonal Right", "Sideways Right", "Custom" };
+            static const float k_bg_angles[4] = { 0.f, -22.f, 22.f, 68.f };
+
+            int dir = 4;
+            for (int i = 0; i < 4; ++i)
+                if (ImFabs(settings::appearance::bg_angle - k_bg_angles[i]) < 0.75f) { dir = i; break; }
+
+            int picked = dir;
+            RowCombo("cfg_bgdir", "Direction", nullptr, &picked, k_bg_dirs, 5);
+            if (picked != dir && picked < 4)
+            {
+                settings::appearance::bg_angle = k_bg_angles[picked];
+                dir = picked;
+            }
+            settings::appearance::bg_dir = dir;
+
+            RowSliderF("cfg_bgangle", "Angle", &settings::appearance::bg_angle, -70.f, 70.f, "%.0f deg");
+
+            if (settings::appearance::bg_effect == 2)
+            {
+                RowSliderF("cfg_bgspread", "Spread", &settings::appearance::bg_spread, 0.f, 25.f, "%.1f deg");
+                RowSliderF("cfg_bgwidth", "Drop Width", &settings::appearance::bg_width, 0.4f, 3.f, "%.2f x");
+            }
+            RowSliderF("cfg_bgstreak", "Streak Length", &settings::appearance::bg_streak, 0.2f, 3.f, "%.2f x");
+        }
+
+        RowSliderF("cfg_bgspeed", "Speed", &settings::appearance::bg_speed, 0.05f, 3.f, "%.2f x");
+        RowSliderF("cfg_bgdens", "Density", &settings::appearance::bg_density, 0.05f, 3.f, "%.2f x");
+        RowSliderF("cfg_bgsize", "Size", &settings::appearance::bg_size, 0.2f, 3.f, "%.2f x");
+        RowSliderF("cfg_bgopac", "Opacity", &settings::appearance::bg_opacity, 0.f, 1.f, "%.2f");
+        RowSliderF("cfg_bgglow", "Glow", &settings::appearance::bg_glow, 0.f, 1.f, "%.2f");
+        ColorRow("cfg_bgcol", "Colour", nullptr, settings::appearance::bg_color, true);
+        RowSliderF("cfg_bgwind", "Wind", &settings::appearance::bg_wind, -1.f, 1.f, "%.2f");
+        RowToggle("cfg_bgpar", "Parallax", &settings::appearance::bg_parallax);
+        RowToggle("cfg_bgmenu", "Menu Only", &settings::appearance::bg_menu_only);
     }
 }
 

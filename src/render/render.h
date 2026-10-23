@@ -30,22 +30,22 @@ public:
 	bool create_device();
 	bool create_window();
 
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
 	void trace(const char* phase, double ms);
 
 	int get_ping_ms();

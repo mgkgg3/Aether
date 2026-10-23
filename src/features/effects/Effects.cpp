@@ -20,9 +20,12 @@
 #include <cache/cache.h>
 #include <sdk/sdk.h>
 #include <memory/memory.h>
+#include <render/ShapeDraw.h>
+#include <render/ViewClip.h>
 #include <features/misc/HitSounds.h>
 #include <features/aimbot/aimbot.h>
 #include <features/silentaim/silentaim.h>
+#include <features/worldgeo/WorldGeo.h>
 
 namespace effects
 {
@@ -50,9 +53,69 @@ namespace effects
 			char          text[48]{};
 		};
 
+		// The damage toast: one card per landed hit, a log rather than
+		// a mark at the impact.  It carries the source's fields - who, how much,
+		// which part - and nothing else.
+		struct hit_note_t
+		{
+			char  name[40]{};
+			char  part[16]{};
+			float damage{ 0.f };
+			float age{ 0.f };
+			float life{ 3.f };
+		};
+
+		// One fired shot, as the segment it travelled.  It is *world* geometry,
+		// not screen: the camera keeps turning after the shot, and a streak that
+		// was pinned to the screen at spawn would slide off the world it belongs
+		// to the moment the player looked anywhere else.
+		struct tracer_t
+		{
+			math::vector3 from{};
+			math::vector3 to{};
+			float         age{ 0.f };
+			float         life{ 1.60f };
+			ImU32         col{ IM_COL32(255, 224, 107, 255) };
+			float         thickness{ 1.8f };
+			bool          fade{ true };
+
+			// A muzzle streak rather than a path: `from` is still the world muzzle,
+			// but the far end is *screen* space - it runs towards the crosshair - so
+			// a shot into open air still draws a streak without needing the bullet's
+			// endpoint, which only the game itself knows.
+			bool          screen{ false };
+		};
+
 		std::mutex             g_mtx;
 		std::vector<marker_t>  g_markers;
 		std::vector<hit_text_t> g_texts;
+		std::vector<hit_note_t> g_notes;
+		std::vector<tracer_t>  g_tracers;
+
+		// A blast is several damage events on one target at one spot, and one
+		// streak per pellet is a smear rather than a tracer.  A new streak whose
+		// two ends are both within a stud of a live one is the same shot and is
+		// dropped - but only while that is plainly the same shot: a whole blast is
+		// resolved inside one tick of the watcher thread below (4 ms), so the
+		// window has to cover the tick and nothing more.  At a quarter of a second
+		// it also swallowed the *next* click on the same target, which is how four
+		// shots into one player came out as a single streak.
+		bool tracer_duplicate(const tracer_t& tr)
+		{
+			// Not called `near`: that is one of the legacy far/near macros the
+			// Windows headers still define, and it expands to nothing here.
+			const auto close_enough = [](const math::vector3& a, const math::vector3& b)
+			{
+				const float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+				return dx * dx + dy * dy + dz * dz < 1.f;
+			};
+
+			for (const tracer_t& other : g_tracers)
+				if (other.age < 0.06f && close_enough(other.from, tr.from) && close_enough(other.to, tr.to))
+					return true;
+
+			return false;
+		}
 
 		struct watch_t { float hp{ -1.f }; std::uint64_t seen_ms{ 0 }; };
 		std::unordered_map<std::uint64_t, watch_t> g_watch;
@@ -90,9 +153,15 @@ namespace effects
 
 		std::uint64_t now_ms() { return (std::uint64_t)GetTickCount64(); }
 
+		// A shot *starts* on the frame the button goes down; `recent_shot` stays
+		// true for a while after, which is what the hitmarker wants and not what a
+		// tracer does - one click should not leave a dozen streaks.
+		bool g_shot_edge = false;
+
 		bool recent_shot(std::uint64_t ms)
 		{
 			const bool down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+			g_shot_edge = down && !g_lmb_was;
 			if (down && !g_lmb_was) g_lmb_at = ms;
 			g_lmb_was = down;
 			return down || (g_lmb_at != 0 && ms - g_lmb_at <= k_shot_window_ms);
@@ -131,6 +200,57 @@ namespace effects
 		{
 			return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z) &&
 				std::fabs(v.x) < 1.0e6f && std::fabs(v.y) < 1.0e6f && std::fabs(v.z) < 1.0e6f;
+		}
+
+		ImU32 with_alpha(ImU32 c, float a)
+		{
+			const float k = std::clamp(a, 0.f, 1.f);
+			const ImU32 al = (ImU32)(((c >> IM_COL32_A_SHIFT) & 0xFF) * k);
+			return (c & 0x00FFFFFFu) | (al << IM_COL32_A_SHIFT);
+		}
+
+		// The tracer's colour, sampled at spawn: rainbow reads the clock, so two
+		// shots half a second apart are two colours, while a plain colour is the
+		// setting itself.  (The reference did the same - one colour per tracer,
+		// fixed when it is created, so a fading streak does not shift hue.)
+		ImU32 tracer_colour()
+		{
+			if (cfg::tracer_rainbow)
+			{
+				const float hue = std::fmod((float)ImGui::GetTime() *
+					std::max(0.01f, cfg::tracer_rainbow_speed), 1.f);
+				const ImVec4 c = ImColor::HSV(hue < 0.f ? hue + 1.f : hue, 0.62f, 1.f);
+				return IM_COL32((int)(c.x * 255.f), (int)(c.y * 255.f), (int)(c.z * 255.f), 255);
+			}
+
+			return IM_COL32((int)(cfg::tracer_color[0] * 255.f),
+				(int)(cfg::tracer_color[1] * 255.f), (int)(cfg::tracer_color[2] * 255.f),
+				(int)(cfg::tracer_color[3] * 255.f));
+		}
+
+		// Where the shot came from: the hand holding the tool when it can be
+		// found, so the streak leaves the gun on screen, and the camera when it
+		// cannot - which is also what a first-person shot looks like.
+		math::vector3 tracer_origin(const math::vector3& fallback)
+		{
+			if (!cfg::tracer_from_tool) return fallback;
+
+			static const char* const k_muzzle[] = { "RightHand", "Right Arm", "Handle", "Head" };
+			for (const char* n : k_muzzle)
+			{
+				auto it = cache::cached_local_player.parts.find(n);
+				if (it == cache::cached_local_player.parts.end() || !it->second.address) continue;
+				try {
+					rbx::primitive_t prim = it->second.get_primitive();
+					if (prim.address)
+					{
+						const math::vector3 p = prim.get_position();
+						if (plausible(p)) return p;
+					}
+				} catch (...) {}
+			}
+
+			return fallback;
 		}
 
 		ImU32 crosshair_base()
@@ -409,7 +529,7 @@ namespace effects
 			const float crit = (m.head && cfg::hitmarker_crit_pulse) ? (1.f - fade_in) : 0.f;
 			const float s = base * pop * (1.f + crit * 0.22f);
 			const ImVec2 c(sp.x, sp.y);
-			const int   mstyle = ImClamp(cfg::hitmarker_style, 0, 5);
+			const int   mstyle = ImClamp(cfg::hitmarker_style, 0, 8);
 
 			auto mul_a = [](ImU32 col, float alpha) -> ImU32 {
 				int na = (int)((float)((col >> IM_COL32_A_SHIFT) & 0xFF) * alpha + 0.5f);
@@ -529,6 +649,52 @@ namespace effects
 					break;
 				}
 
+				case 6:
+				{
+					// Diamond: the cross rotated 45 degrees and
+					// expanding, so it reads as an impact rather than a reticle.
+					const float r = s * (0.55f + t * 0.85f);
+					const ImVec2 p0(c.x, c.y - r), p1(c.x + r, c.y);
+					const ImVec2 p2(c.x, c.y + r), p3(c.x - r, c.y);
+					dl->AddQuad(ImVec2(p0.x + 1.f, p0.y + 1.f), ImVec2(p1.x + 1.f, p1.y + 1.f),
+						ImVec2(p2.x + 1.f, p2.y + 1.f), ImVec2(p3.x + 1.f, p3.y + 1.f), shadow, th * 1.3f);
+					dl->AddQuad(p0, p1, p2, p3, mul_a(hi, a), th * 1.2f);
+					dl->AddQuad(p0, p1, p2, p3, mul_a(acc, a * 0.7f), th * 0.5f);
+					break;
+				}
+
+				case 7:
+				{
+					// Square: four corner brackets around the hit.
+					const float r = s * (0.85f + t * 0.35f);
+					const float arm = s * 0.38f;
+					for (int q = 0; q < 4; ++q)
+					{
+						const float sx = (q & 1) ? 1.f : -1.f;
+						const float sy = (q & 2) ? 1.f : -1.f;
+						const ImVec2 p(c.x + sx * r, c.y + sy * r);
+						dl->AddLine(ImVec2(p.x - sx * arm, p.y), p, mul_a(hi, a), th * 1.2f);
+						dl->AddLine(p, ImVec2(p.x, p.y - sy * arm), mul_a(hi, a), th * 1.2f);
+					}
+					break;
+				}
+
+				case 8:
+				{
+					// Burst: spokes leaving the centre, rotating.
+					const float spin = (float)ImGui::GetTime() * 1.7f;
+					for (int q = 0; q < 8; ++q)
+					{
+						const float ang = spin + (float)q * 0.7853982f;
+						const float r0 = s * (0.25f + t * 0.55f);
+						const float r1 = s * (0.75f + t * 1.10f);
+						dl->AddLine(ImVec2(c.x + std::cos(ang) * r0, c.y + std::sin(ang) * r0),
+							ImVec2(c.x + std::cos(ang) * r1, c.y + std::sin(ang) * r1),
+							mul_a(q % 2 ? acc : hi, a * (1.f - t * 0.5f)), th * 1.1f);
+					}
+					break;
+				}
+
 				default:
 				{
 					const float r = s * (1.85f - t * 1.05f);
@@ -634,6 +800,136 @@ namespace effects
 				IM_COL32((int)(ca[0] * 255.f), (int)(ca[1] * 255.f), (int)(ca[2] * 255.f),
 					(int)(ca[3] * 255.f)), ht.text);
 		}
+
+		void draw_tracer(ImDrawList* dl, const tracer_t& tr,
+			const math::matrix4& view, const math::vector2& dims)
+		{
+			math::vector2 sp_a{}, sp_b{};
+			bool mark_impact = false;
+
+			if (tr.screen)
+			{
+				// The muzzle streak: from the gun towards the crosshair, so it reads
+				// as a shot leaving the barrel at any camera angle.  It is drawn in
+				// screen space because in first person there is nothing else to
+				// draw it from - the hand that fired is at the camera, so its
+				// projected point is usually *outside* the client rectangle (below
+				// it, or behind the near plane), and a streak started there is a
+				// streak nobody sees: that is the "the tracer does not work in
+				// first person" this is.
+				//
+				// So the muzzle is pulled onto the visible rectangle before the
+				// streak is built from it, and when the projection refuses the hand
+				// altogether the streak starts where a first-person weapon sits.
+				const float rx = rbx::visualengine_t::window_offset_x();
+				const float ry = rbx::visualengine_t::window_offset_y();
+				const ImVec2 rmin(rx, ry);
+				const ImVec2 rmax(rx + dims.x, ry + dims.y);
+				const ImVec2 cross(rx + dims.x * 0.5f, ry + dims.y * 0.5f);
+
+				ImVec2 a;
+				if (game::visengine.world_to_screen(tr.from, sp_a, dims, view))
+					a = ImVec2(std::clamp(sp_a.x, rmin.x, rmax.x), std::clamp(sp_a.y, rmin.y, rmax.y));
+				else
+					a = ImVec2(cross.x, rmax.y - dims.y * 0.05f);
+
+				const ImVec2 dir(cross.x - a.x, cross.y - a.y);
+				const float  len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
+				if (len < 6.f) return;
+
+				// A fixed length, not a share of the distance: the streak is the
+				// muzzle flash of one shot, and a third of the way to a target
+				// across the map is not a streak, it is a line.
+				const float want = std::clamp(cfg::tracer_length, 24.f, 400.f);
+				const float k = std::clamp(want / len, 0.12f, 0.90f);
+				sp_a = math::vector2(a.x, a.y);
+				sp_b = math::vector2(a.x + dir.x * k, a.y + dir.y * k);
+			}
+			else
+			{
+				// The world streak: clip it to the view first, then project the part
+				// that survived.  A shot whose path is still crossing the screen
+				// draws even when the muzzle or the impact is behind the camera - and
+				// only a *visible* impact is marked, so the cross cannot end up
+				// pinned to the edge of the screen marking a point nobody can see.
+				const viewclip::segment_t seg = viewclip::clip(view, tr.from, tr.to);
+				if (!seg.visible) return;
+				if (!game::visengine.world_to_screen(seg.from, sp_a, dims, view)) return;
+				if (!game::visengine.world_to_screen(seg.to, sp_b, dims, view)) return;
+				mark_impact = !seg.end_clipped;
+			}
+
+			const float t = std::clamp(tr.age / std::max(0.05f, tr.life), 0.f, 1.f);
+			const float a = tr.fade ? (1.f - t) : 1.f;
+			if (a <= 0.01f) return;
+
+			const ImVec2 A(sp_a.x, sp_a.y);
+			const ImVec2 B(sp_b.x, sp_b.y);
+			const float  w = std::max(0.6f, tr.thickness);
+
+			// The streak is the segment the bullet travelled, so it is drawn as one
+			// band with round caps (render/ShapeDraw.h) rather than as a stroked
+			// line: the ends are struck as discs instead of being cut square, and
+			// the width is the width that was asked for at any thickness.  Glow and
+			// edge are the same segment, wider, so the three passes cannot disagree
+			// about where the shot went.
+			const ImU32 body = with_alpha(tr.col, a);
+
+			if (cfg::tracer_style == 1)
+			{
+				// Beam: the glow stack is the whole shape.
+				shape::beam_line(dl, A, B, w, body);
+			}
+			else if (cfg::tracer_style == 2)
+			{
+				// Laser: travelling dashes.
+				shape::laser_line(dl, A, B, w, body, (float)ImGui::GetTime());
+			}
+			else if (cfg::tracer_style == 3)
+			{
+				// Dots: a bead trail instead of a stroke.
+				shape::dotted_line(dl, A, B, w, body);
+			}
+			else
+			{
+				const float glow = std::clamp(cfg::tracer_glow, 0.f, 1.f);
+				if (glow > 0.01f)
+				{
+					const ImU32 gc = with_alpha(tr.col, a * 0.20f * glow);
+					shape::tapered_band(dl, A, B, w * (1.f + 3.2f * glow), gc, gc, 1.f);
+				}
+
+				if (cfg::tracer_outline)
+				{
+					const ImU32 edge = with_alpha(IM_COL32(0, 0, 0, 255), a);
+					shape::tapered_band(dl, A, B, w + 1.6f, edge, edge, 1.f);
+				}
+
+				shape::tapered_band(dl, A, B, w, body, body, 1.f);
+			}
+
+			// The impact mark, at the far end where the shot landed.  It is a
+			// screen-space cross rather than a world one: an impact is read at the
+			// pixel it landed on, and a cross drawn in the world would tilt with
+			// whatever surface it is painted on.  A muzzle streak has no impact to
+			// mark, so it does not draw one.
+			if (cfg::tracer_impact && mark_impact)
+			{
+				const float s = std::max(2.f, cfg::tracer_impact_size) * (1.f - t * 0.45f);
+				const float th = std::max(1.f, w * 0.65f);
+				const ImU32 ic = with_alpha(tr.col, a * 0.92f);
+
+				if (cfg::tracer_outline)
+				{
+					const ImU32 ice = with_alpha(IM_COL32(0, 0, 0, 255), a * 0.92f);
+					dl->AddLine(ImVec2(B.x - s, B.y), ImVec2(B.x + s, B.y), ice, th + 1.4f);
+					dl->AddLine(ImVec2(B.x, B.y - s), ImVec2(B.x, B.y + s), ice, th + 1.4f);
+				}
+
+				dl->AddLine(ImVec2(B.x - s, B.y), ImVec2(B.x + s, B.y), ic, th);
+				dl->AddLine(ImVec2(B.x, B.y - s), ImVec2(B.x, B.y + s), ic, th);
+			}
+		}
 	}
 
 	void reset()
@@ -641,6 +937,7 @@ namespace effects
 		std::lock_guard<std::mutex> lk(g_mtx);
 		g_markers.clear();
 		g_texts.clear();
+		g_tracers.clear();
 		g_watch.clear();
 		g_own_hits.clear();
 		g_aim_addr  = 0;
@@ -654,9 +951,10 @@ namespace effects
 		g_flash = 0.f;
 	}
 
-	void play_hit_sound()
+	void play_hit_sound(bool head)
 	{
 		if (!settings::effects::hitsound) return;
+		if (settings::effects::hitsound_head_only && !head) return;
 		hitsounds::play(settings::effects::hitsound_index);
 	}
 
@@ -714,15 +1012,19 @@ namespace effects
 					it = (it->age += dt) >= it->life ? g_markers.erase(it) : it + 1;
 				for (auto it = g_texts.begin(); it != g_texts.end(); )
 					it = (it->age += dt) >= it->life ? g_texts.erase(it) : it + 1;
+				for (auto it = g_tracers.begin(); it != g_tracers.end(); )
+					it = (it->age += dt) >= it->life ? g_tracers.erase(it) : it + 1;
 			}
 
 			if (!settings::effects::hitmarker && !settings::effects::hitdata &&
-				!settings::effects::hitsound &&
+				!settings::effects::hitsound && !settings::effects::tracers &&
 				!settings::visuals::hit_chams && !settings::visuals::hit_skeleton)
 				continue;
 
 			std::vector<cache::entity_t> snap;
 			math::vector3 local{};
+			math::vector3 muzzle{};
+			bool          have_muzzle = false;
 			{
 				std::lock_guard<std::mutex> lk(cache::mtx);
 				snap = cache::cached_players;
@@ -733,6 +1035,15 @@ namespace effects
 						rbx::primitive_t p = hrp->second.get_primitive();
 						if (p.address) local = p.get_position();
 					} catch (...) {}
+				}
+
+				// The muzzle is read under the cache lock, with the rest of the
+				// snapshot: the cache rebuild replaces the parts map every tick, and
+				// reading it while it is being rewritten is a torn read.
+				if (settings::effects::tracers && plausible(local))
+				{
+					muzzle = tracer_origin(worldgeo::eye_position(local));
+					have_muzzle = plausible(muzzle);
 				}
 			}
 
@@ -788,6 +1099,8 @@ namespace effects
 					}
 					else
 					{
+						// The crosshair is the viewport centre in the space world_to_screen
+						// returns, i.e. with the client's own origin on top of it.
 						const float ccx = rbx::visualengine_t::window_offset_x() + shot_dims.x * 0.5f;
 						const float ccy = rbx::visualengine_t::window_offset_y() + shot_dims.y * 0.5f;
 
@@ -802,6 +1115,25 @@ namespace effects
 				{
 					std::lock_guard<std::mutex> lk(g_mtx);
 					g_own_hits[e.instance.address] = ms;
+
+					// The shot registered: a streak from wherever it was fired from to
+					// the point that took the damage.
+					if (cfg::tracers && have_muzzle)
+					{
+						tracer_t tr;
+						tr.from      = muzzle;
+						tr.to        = origin;
+						tr.life      = std::max(0.10f, cfg::tracer_duration);
+						tr.thickness = std::clamp(cfg::tracer_thickness, 0.5f, 12.f);
+						tr.fade      = cfg::tracer_fade;
+						tr.col       = tracer_colour();
+
+						if (!tracer_duplicate(tr))
+						{
+							g_tracers.push_back(tr);
+							while (g_tracers.size() > 64) g_tracers.erase(g_tracers.begin());
+						}
+					}
 				}
 
 				bool head = false;
@@ -830,9 +1162,21 @@ namespace effects
 					g_last_hit_damage = damage;
 				}
 
-				play_hit_sound();
+				play_hit_sound(head);
 
 				std::lock_guard<std::mutex> lk(g_mtx);
+
+				if (settings::fusion::hit_notifications)
+				{
+					const std::string& nm = e.display_name.empty() ? e.name : e.display_name;
+					hit_note_t n;
+					std::snprintf(n.name, sizeof(n.name), "%s", nm.empty() ? "player" : nm.c_str());
+					std::snprintf(n.part, sizeof(n.part), "%s", head ? "head" : "body");
+					n.damage = damage;
+					n.life   = std::max(0.5f, settings::fusion::hit_notification_seconds);
+					g_notes.push_back(n);
+					while (g_notes.size() > 6) g_notes.erase(g_notes.begin());
+				}
 
 				if (settings::effects::hitmarker)
 				{
@@ -878,6 +1222,28 @@ namespace effects
 						g_texts.push_back(t);
 					}
 					while (g_texts.size() > 36) g_texts.erase(g_texts.begin());
+				}
+			}
+
+			// Every-shot tracers: one streak per click, from the muzzle towards the
+			// crosshair, whether or not anything was hit.  The hit-based path above
+			// needs a player to lose health, which is why it can sit silent for a
+			// whole fight while the shots are flying.
+			if (cfg::tracers && cfg::tracer_mode == 1 && g_shot_edge && have_muzzle)
+			{
+				tracer_t tr;
+				tr.from      = muzzle;
+				tr.screen    = true;
+				tr.life      = std::max(0.10f, cfg::tracer_duration);
+				tr.thickness = std::clamp(cfg::tracer_thickness, 0.5f, 12.f);
+				tr.fade      = cfg::tracer_fade;
+				tr.col       = tracer_colour();
+
+				std::lock_guard<std::mutex> lk(g_mtx);
+				if (!tracer_duplicate(tr))
+				{
+					g_tracers.push_back(tr);
+					while (g_tracers.size() > 64) g_tracers.erase(g_tracers.begin());
 				}
 			}
 
@@ -931,9 +1297,58 @@ namespace effects
 		draw_crosshair(draw_list);
 
 		std::lock_guard<std::mutex> lk(g_mtx);
+
+		// The streaks first, so the hitmarkers and the damage text stay on top of
+		// the shot that caused them.
+		for (auto& tr : g_tracers)
+			draw_tracer(draw_list, tr, view, dims);
 		for (auto& m : g_markers)
 			draw_marker(draw_list, m, view, dims);
 		for (auto& t : g_texts)
 			draw_hit_text(draw_list, t, view, dims);
+
+		if (settings::fusion::hit_notifications)
+		{
+			const float dt = ImClamp(ImGui::GetIO().DeltaTime, 0.f, 0.1f);
+			ImFont* font = ImGui::GetFont();
+			const float fs = ImGui::GetFontSize();
+
+			for (auto it = g_notes.begin(); it != g_notes.end(); )
+			{
+				it->age += dt;
+				if (it->age >= it->life) it = g_notes.erase(it);
+				else ++it;
+			}
+
+			// Newest at the top, so the log reads downwards in time and the card
+			// that just arrived is the one at eye level.
+			float y = dims.y * 0.20f;
+			for (auto it = g_notes.rbegin(); it != g_notes.rend(); ++it)
+			{
+				const hit_note_t& n = *it;
+				const float t   = n.age / n.life;
+				const float in  = ImClamp(n.age / 0.16f, 0.f, 1.f);
+				const float out = ImClamp((1.f - t) / 0.28f, 0.f, 1.f);
+				const float a   = ImMin(in, out);
+				if (a <= 0.01f) continue;
+
+				char text[96];
+				std::snprintf(text, sizeof(text), "%s   -%.0f   %s", n.name, n.damage, n.part);
+
+				const ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0.f, text);
+				const float w = ts.x + 20.f;
+				const float h = ts.y + 10.f;
+				const float x = dims.x - 14.f - w + (1.f - in) * 26.f;
+
+				draw_list->AddRectFilled({ x, y }, { x + w, y + h },
+					IM_COL32(12, 12, 15, (int)(205.f * a)), 4.f);
+				draw_list->AddRectFilled({ x, y }, { x + 3.f, y + h },
+					IM_COL32(255, 72, 72, (int)(235.f * a)), 4.f);
+				draw_list->AddText(font, fs, { x + 11.f, y + 5.f },
+					IM_COL32(255, 255, 255, (int)(238.f * a)), text);
+
+				y += h + 4.f;
+			}
+		}
 	}
 }

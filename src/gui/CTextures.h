@@ -23,7 +23,4 @@ public:
 	ID3D11ShaderResourceView* tFolder;
 	ID3D11ShaderResourceView* tHome;
 	ID3D11ShaderResourceView* tSettings;
-	ID3D11ShaderResourceView* tSpotify;
-
-	ID3D11ShaderResourceView* tWaypoint;
 };

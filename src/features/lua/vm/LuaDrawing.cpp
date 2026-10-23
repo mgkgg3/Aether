@@ -20,7 +20,7 @@ namespace Features {
 namespace LuaDrawing {
 namespace {
 
-constexpr const char* k_mt = "aether.Drawing";
+constexpr const char* k_mt = "jewsploit.Drawing";
 
 enum class DrawType : int {
 	Line = 0,

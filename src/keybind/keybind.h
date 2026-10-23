@@ -199,8 +199,8 @@ public:
     void update()
     {
         if (key == 0) {
-
-
+            
+            
             enabled = (type == ALWAYS);
             return;
         }

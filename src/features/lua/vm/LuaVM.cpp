@@ -169,7 +169,7 @@ int l_warn(lua_State* L)
 
 int l_identifyexecutor(lua_State* L)
 {
-	lua_pushstring(L, "aether");
+	lua_pushstring(L, "jewsploit");
 	lua_pushstring(L, "0.1");
 	return 2;
 }
@@ -236,7 +236,7 @@ void push_task_token(lua_State* L, int idx)
 	auto* ud = static_cast<DelayUd*>(lua_newuserdata(L, sizeof(DelayUd)));
 	ud->idx = idx;
 	ud->seq = g_delays[static_cast<size_t>(idx)].seq;
-	luaL_getmetatable(L, "aether.Task");
+	luaL_getmetatable(L, "jewsploit.Task");
 	lua_setmetatable(L, -2);
 }
 
@@ -258,7 +258,7 @@ int l_defer(lua_State* L)
 int l_cancel(lua_State* L)
 {
 
-	if (auto* ud = static_cast<DelayUd*>(luaL_testudata(L, 1, "aether.Task")))
+	if (auto* ud = static_cast<DelayUd*>(luaL_testudata(L, 1, "jewsploit.Task")))
 	{
 		if (ud->idx < 0 || ud->idx >= static_cast<int>(g_delays.size()))
 			return 0;
@@ -379,7 +379,7 @@ void OpenSafeLibs(lua_State* L)
 
 int l_conn_disconnect(lua_State* L)
 {
-	auto* ud = static_cast<ConnUd*>(luaL_checkudata(L, 1, "aether.RBXScriptConnection"));
+	auto* ud = static_cast<ConnUd*>(luaL_checkudata(L, 1, "jewsploit.RBXScriptConnection"));
 	if (!ud || ud->idx < 0 || ud->idx >= static_cast<int>(g_conns.size()))
 		return 0;
 
@@ -571,7 +571,7 @@ int l_signal_connect(lua_State* L)
 	ud->idx = idx;
 	ud->seq = seq;
 
-	if (luaL_newmetatable(L, "aether.RBXScriptConnection"))
+	if (luaL_newmetatable(L, "jewsploit.RBXScriptConnection"))
 	{
 		lua_pushcfunction(L, l_conn_disconnect);
 		lua_setfield(L, -2, "Disconnect");
@@ -1108,7 +1108,7 @@ std::uint64_t find_jp_bus()
 		Globals::InstanceDataModel.address, "ReplicatedStorage");
 	if (!rs)
 		return 0;
-	const std::uint64_t folder = find_child_named(rs, "AetherTest");
+	const std::uint64_t folder = find_child_named(rs, "JewsploitTest");
 	if (!folder)
 		return 0;
 	return find_child_named(folder, "Bus");
@@ -1144,7 +1144,7 @@ std::uint64_t resolve_jp_target(const std::string& name)
 
 	const std::uint64_t rs = find_child_named(
 		Globals::InstanceDataModel.address, "ReplicatedStorage");
-	const std::uint64_t folder = rs ? find_child_named(rs, "AetherTest") : 0;
+	const std::uint64_t folder = rs ? find_child_named(rs, "JewsploitTest") : 0;
 	if (folder)
 	{
 		const std::uint64_t hit = find_child_deep(folder, name.c_str(), 2);
@@ -1510,7 +1510,7 @@ bool http_request_raw(const std::string& method, const std::string& url,
 	if (!parse_url(url, https, host, port, path))
 		return false;
 
-	HINTERNET ses = WinHttpOpen(L"aether/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+	HINTERNET ses = WinHttpOpen(L"jewsploit/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
 		WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 	if (!ses)
 		return false;
@@ -1845,7 +1845,7 @@ void RegisterApi(lua_State* L)
 	lua_pushcfunction(L, l_iskeypressed);
 	lua_setglobal(L, "iskeypressed");
 
-	luaL_newmetatable(L, "aether.Task");
+	luaL_newmetatable(L, "jewsploit.Task");
 	lua_pop(L, 1);
 
 	lua_newtable(L);

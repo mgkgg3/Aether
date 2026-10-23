@@ -312,6 +312,8 @@ namespace radar
 		const ImVec2 rmin(center.x - half, center.y - half);
 		const ImVec2 rmax(center.x + half, center.y + half);
 
+		// A round radar still clips against the inscribed square so a wall
+		// polygon can never poke out past the circle.
 		const float clip_half = round ? half * 0.72f : half;
 		const ImVec2 cmin(center.x - clip_half, center.y - clip_half);
 		const ImVec2 cmax(center.x + clip_half, center.y + clip_half);
@@ -365,6 +367,7 @@ namespace radar
 		if (!has_lp || !has_cam)
 			return;
 
+		// Rotate With Camera off pins the map to world north instead.
 		math::vector3 fwd{}, rgt{};
 		if (spin)
 			xz_basis_from_camera(cam_rot, fwd, rgt);
@@ -426,8 +429,35 @@ namespace radar
 			if (spin)
 				draw->AddText(rf, fh, ImVec2(center.x - 3.f, center.y - half + 5.f),
 					IM_COL32(150, 150, 158, 170), "N");
+
+			// Directional: the rim gets eight bearing ticks and the
+			// four cardinals spelled out, so a reading can be taken without
+			// turning the map.
+			if (settings::visuals::radar_style == 2)
+			{
+				static const char* const card[4] = { "N", "E", "S", "W" };
+				for (int i = 0; i < 8; ++i)
+				{
+					const float ang = (float)i * 0.7853982f - 1.5707963f;
+					const float r0 = half - (i % 2 == 0 ? 8.f : 4.f);
+					const float cs = std::cos(ang), sn = std::sin(ang);
+					draw->AddLine(ImVec2(center.x + cs * r0, center.y + sn * r0),
+						ImVec2(center.x + cs * (half - 2.f), center.y + sn * (half - 2.f)),
+						IM_COL32(190, 196, 206, (int)(120.f * plate)), 1.f);
+				}
+				for (int i = 0; i < 4; ++i)
+				{
+					const float ang = (float)i * 1.5707964f - 1.5707963f;
+					const ImVec2 p(center.x + std::cos(ang) * (half - 18.f),
+						center.y + std::sin(ang) * (half - 18.f));
+					const ImVec2 ts = rf->CalcTextSizeA(fh, FLT_MAX, 0.f, card[i]);
+					draw->AddText(rf, fh, ImVec2(p.x - ts.x * 0.5f, p.y - ts.y * 0.5f),
+						IM_COL32(170, 176, 188, (int)(180.f * plate)), card[i]);
+				}
+			}
 		}
 
+		// Sweep: one bright line with a short afterglow trailing it.
 		if (settings::visuals::radar_sweep)
 		{
 			static float s_angle = 0.f;
@@ -444,6 +474,7 @@ namespace radar
 			}
 		}
 
+		// World geometry, re-collected only when the local player has moved.
 		static auto s_last_wall_refresh = std::chrono::steady_clock::now() - std::chrono::seconds(2);
 		static math::vector3 s_last_wall_pos{};
 		const auto now = std::chrono::steady_clock::now();
@@ -538,8 +569,13 @@ namespace radar
 
 			if (is_local)
 			{
+				// A triangle aimed along the camera's ground heading, so the
+				// marker also shows which way the view is facing.  Directional
+				// draws it larger with a tail, which reads at a glance
+				// instead of needing the point inspected.
 				const ImVec2 u(fwd.x, fwd.z);
-				const float  s = 6.f;
+				const bool directional = settings::visuals::radar_style == 2;
+				const float  s = directional ? 9.f : 6.f;
 				ImVec2 tri[3] = {
 					ImVec2(p.x + u.x * s,         p.y + u.y * s),
 					ImVec2(p.x - u.y * s * 0.72f, p.y + u.x * s * 0.72f),
@@ -547,11 +583,18 @@ namespace radar
 				};
 				draw->AddConvexPolyFilled(tri, 3, accent);
 				draw->AddPolyline(tri, 3, IM_COL32(255, 255, 255, 190), ImDrawFlags_Closed, 1.f);
+				if (directional)
+					draw->AddLine(p, ImVec2(p.x - u.x * s * 1.4f, p.y - u.y * s * 1.4f), accent, 2.f);
 				continue;
 			}
 
 			const ImU32 col = cache::is_teammate(entity) ? ally_col : enemy_col;
 			const ImU32 dot = dead ? fade(col, 0.45f) : col;
+
+			// Bearing: a faint spoke from the hub to each contact,
+			// so a direction can be read without judging the dot's offset.
+			if (settings::visuals::radar_style == 1 && !dead)
+				draw->AddLine(center, p, fade(dot, 0.20f * plate), 1.f);
 
 			if (dead)
 			{

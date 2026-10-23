@@ -617,6 +617,9 @@ GpuMesh Upload(const vertex_t* verts, std::size_t vcount,
 
 bool CreateDepth(unsigned w, unsigned h)
 {
+	// The depth textures cover the placed viewport, not just its size: depth
+	// testing indexes the view by render-target pixel, so a viewport at (ox,oy)
+	// needs a depth buffer that reaches ox + w.
 	const unsigned tex_w = (unsigned)(g_origin_x + 0.5f) + w;
 	const unsigned tex_h = (unsigned)(g_origin_y + 0.5f) + h;
 
@@ -1020,6 +1023,10 @@ void Shutdown()
 
 void SetOrigin(float ox, float oy)
 {
+	// The overlay covers the monitor while the game's 3D view sits at its client
+	// rect, so the pass has to be placed there. In a fullscreen client the origin
+	// is (0,0) and this is a no-op - which is why the mistake only ever showed up
+	// once the game was windowed.
 	if (!std::isfinite(ox) || ox < 0.f) ox = 0.f;
 	if (!std::isfinite(oy) || oy < 0.f) oy = 0.f;
 	if (ox == g_origin_x && oy == g_origin_y)

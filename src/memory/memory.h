@@ -44,8 +44,8 @@ public:
 	template <typename T>
 	void write(std::uint64_t address, T value);
 
-
-
+	
+	
 	std::size_t read_raw(std::uint64_t address, void* buffer, std::size_t size);
 	std::size_t write_raw(std::uint64_t address, const void* data, std::size_t size);
 	std::uint64_t alloc(std::size_t size, DWORD protection = PAGE_READWRITE);

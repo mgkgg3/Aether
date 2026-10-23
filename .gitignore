@@ -1,0 +1,11 @@
+# build output
+build/
+artifacts/
+*.obj
+*.pdb
+*.ipdb
+*.iobj
+*.ilk
+*.exe
+*.log
+*.tlog

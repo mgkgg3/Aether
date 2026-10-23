@@ -283,6 +283,29 @@ namespace wown
         return g_owner[idx].load() == (std::uint8_t)f;
     }
 
+    // Claims each field that nobody else owns yet and answers how many it got.
+    // The atmosphere's fog fallback uses this rather than claim(): the Fog
+    // section drives the same three fields, and whichever of the two came
+    // second has to stand down instead of the two of them writing over each
+    // other every tick.
+    inline int try_claim(feat f, const field* fields, int n)
+    {
+        if (!fields || n <= 0) return 0;
+
+        int got = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            const int idx = (int)fields[i];
+            if (idx < 0 || idx >= k_field_count) continue;
+
+            std::uint8_t held = (std::uint8_t)feat::none;
+            if (g_owner[idx].compare_exchange_strong(held, (std::uint8_t)f) ||
+                held == (std::uint8_t)f)
+                ++got;
+        }
+        return got;
+    }
+
     inline void release(feat f, const field* fields, int n)
     {
         if (!fields || n <= 0) return;
@@ -298,14 +321,36 @@ namespace wown
 
 static std::atomic<bool> s_invalidate_ready{ false };
 
+static void lighting_invalidate();
+static void invalidate_sky();
+
+// Anything that writes the Lighting or the Sky under it says so, so the world
+// tab and the skybox presets share the one invalidation rather than each
+// growing its own.
+void world_effects::notify_lighting_changed()
+{
+    lighting_invalidate();
+}
+
+// What a write into the Sky instance itself needs: the client builds the sky
+// environment it draws from that instance and keeps a flag saying the one it
+// has is still current, so the fields can be written and the client keeps
+// drawing the sky it built earlier.  The world tab's own sky rows clear that
+// flag (invalidate_sky, next to apply_sky); the preset table writes the same
+// instance, so it clears it too - without it a preset lands in the instance
+// and never reaches a frame.
+void world_effects::notify_sky_changed()
+{
+    invalidate_sky();
+    lighting_invalidate();
+}
+
 static void lighting_invalidate()
 {
     try
     {
-        if (!game::visengine.address) return;
-        const std::uint64_t rv = memory->read<std::uint64_t>(
-            game::visengine.address + Offsets::VisualEngine::RenderView);
-        if (!rv || (rv & 7)) return;
+        const std::uint64_t rv = rbx::visualengine_t::render_view();
+        if (!rv) return;
 
         static std::uint32_t  s_quiet = 0;
         static std::uintptr_t s_fields[8]{};
@@ -844,6 +889,129 @@ static void apply_lighting(std::uint64_t L)
     verify_ambient(L);
 }
 
+// ---- the atmosphere ----
+//
+// An atmosphere is an instance under the Lighting, and a place does not have to
+// have one: the place this build is pointed at has none, so the override used
+// to do nothing at all there and said nothing about it.  Two paths now:
+//
+//   * the instance exists: the six fields are written straight into it, which
+//     is the whole feature;
+//   * it does not: the same rows stand in through the Lighting's own fog (fog
+//     end from Density, fog start from Offset, fog colour mixed from Haze
+//     Colour by Haze), which is the one thing every place has.  Those three
+//     fields are claimed only if the Fog section is not already driving them,
+//     and either side stands down rather than the two overwriting each other.
+//
+// The status the tab shows says which of the two is in play, so "it does
+// nothing" is answerable from the page instead of from a guess.
+static std::atomic<bool> s_atmo_on_fog{ false };
+
+bool world_effects::atmosphere_on_fog() { return s_atmo_on_fog.load(); }
+
+static void apply_atmosphere_fog(std::uint64_t L, bool on)
+{
+    static const wown::field fields[] = {
+        wown::field::fog_start, wown::field::fog_end, wown::field::fog_col,
+    };
+
+    static bool      was = false;
+    static bool      have_backup = false;
+    static float     bak_s = 0.f, bak_e = 100000.f;
+    static RbxColor3 bak_c{};
+
+    if (!L) return;
+
+    if (!on)
+    {
+        if (!was) return;
+
+        if (wown::owns(wown::feat::atmo, wown::field::fog_start))
+            force_write<float>(L + Offsets::Lighting::FogStart, bak_s);
+        if (wown::owns(wown::feat::atmo, wown::field::fog_end))
+            force_write<float>(L + Offsets::Lighting::FogEnd, bak_e);
+        if (wown::owns(wown::feat::atmo, wown::field::fog_col))
+            force_write<RbxColor3>(L + Offsets::Lighting::FogColor, bak_c);
+
+        wown::release(wown::feat::atmo, fields, 3);
+        was = false;
+        have_backup = false;
+        s_atmo_on_fog.store(false);
+        lighting_invalidate();
+        return;
+    }
+
+    namespace atmo = settings::world::atmosphere;
+
+    if (!was)
+    {
+        const int got = wown::try_claim(wown::feat::atmo, fields, 3);
+        if (got == 0)
+        {
+            // The Fog section owns all three: the atmosphere's rows have
+            // nothing left to move, and saying so once is better than silently
+            // fighting it every tick.
+            static bool warned = false;
+            if (!warned)
+            {
+                warned = true;
+                debug::log("world", "no Atmosphere in this place and the Fog section owns the fog "
+                    "- the atmosphere override has nothing to write (turn the Fog section off)");
+            }
+            s_atmo_on_fog.store(false);
+            return;
+        }
+
+        try
+        {
+            bak_s = memory->read<float>(L + Offsets::Lighting::FogStart);
+            bak_e = memory->read<float>(L + Offsets::Lighting::FogEnd);
+            bak_c = memory->read<RbxColor3>(L + Offsets::Lighting::FogColor);
+            have_backup = true;
+        }
+        catch (...) { have_backup = false; }
+
+        was = true;
+        s_atmo_on_fog.store(got > 0);
+
+        debug::log("world", "atmosphere: no Atmosphere instance in this place - standing in on the "
+            "Lighting's fog (fog end from Density, fog start from Offset, fog colour from Haze Colour)");
+    }
+
+    const float d = clampf(atmo::density, 0.f, 1.f);
+    const float o = clampf(atmo::offset, 0.f, 1.f);
+    const float h = clampf(atmo::haze, 0.f, 10.f);
+
+    // Density 0 with no haze is the place's own air: nothing to write, and the
+    // fields go back to what they held (the switch stays where it is).
+    const bool wants = d > 0.001f || h > 0.001f;
+
+    bool dirty = false;
+
+    if (wown::owns(wown::feat::atmo, wown::field::fog_end))
+        dirty |= write_changed<float>(L + Offsets::Lighting::FogEnd,
+            wants ? std::max(40.f, 4000.f * (1.f - d)) : (have_backup ? bak_e : 100000.f));
+
+    if (wown::owns(wown::feat::atmo, wown::field::fog_start))
+        dirty |= write_changed<float>(L + Offsets::Lighting::FogStart,
+            wants ? std::max(0.f, 4000.f * (1.f - d)) * o * 0.4f : (have_backup ? bak_s : 0.f));
+
+    if (wown::owns(wown::feat::atmo, wown::field::fog_col))
+    {
+        // Haze mixes the haze colour toward the decay colour the way the
+        // instance would: more haze, more of the decay's tint in the air.
+        const float t = clampf(h / 10.f, 0.f, 1.f);
+        float c[3];
+        for (int i = 0; i < 3; ++i)
+            c[i] = atmo::color[i] + (atmo::decay[i] - atmo::color[i]) * t;
+
+        dirty |= write_changed<RbxColor3>(L + Offsets::Lighting::FogColor,
+            wants ? to_rbx(c) : (have_backup ? bak_c : to_rbx(atmo::color)));
+    }
+
+    if (dirty) lighting_invalidate();
+}
+
 static void apply_atmosphere(std::uint64_t L, bool force_off)
 {
     static const wown::field fields[] = { wown::field::atmo };
@@ -852,6 +1020,26 @@ static void apply_atmosphere(std::uint64_t L, bool force_off)
     if (!L) return;
 
     const bool on = settings::world::atmosphere::enabled && !force_off;
+
+    // One lookup for the tick, used by both paths.
+    const std::uint64_t A = get_atmosphere(L);
+
+    // No Atmosphere under this Lighting: the rows go on the fog instead.
+    if (!A)
+    {
+        apply_atmosphere_fog(L, on);
+        if (was)
+        {
+            // The instance came or went with the place: give back what this
+            // path owns before the other one takes over.
+            wown::release(wown::feat::atmo, fields, 1);
+            was = false;
+        }
+        return;
+    }
+
+    // An instance exists again: drop whatever the fog fallback was holding.
+    apply_atmosphere_fog(L, false);
 
     if (on)
     {
@@ -863,9 +1051,6 @@ static void apply_atmosphere(std::uint64_t L, bool force_off)
 
         if (!wown::owns(wown::feat::atmo, wown::field::atmo))
             return;
-
-        std::uint64_t A = get_atmosphere(L);
-        if (!A) return;
 
         namespace atmo = settings::world::atmosphere;
         bool dirty = false;
@@ -879,7 +1064,18 @@ static void apply_atmosphere(std::uint64_t L, bool force_off)
         }
         catch (...) { return; }
 
-        (void)dirty;
+        // One line every few seconds while the atmosphere is on, so "it stopped
+        // working" can be answered from the log instead of guessed at.
+        static unsigned long long s_atmo_log_at = 0;
+        const unsigned long long atmo_now = ::GetTickCount64();
+        if (atmo_now >= s_atmo_log_at)
+        {
+            s_atmo_log_at = atmo_now + 5000ull;
+            debug::log("world", "atmosphere applied at 0x%llX (density %.2f haze %.2f glare %.2f)%s",
+                (unsigned long long)A, atmo::density, atmo::haze, atmo::glare,
+                dirty ? " - the game had different values" : "");
+        }
+
         lighting_invalidate();
         return;
     }
@@ -943,10 +1139,10 @@ static void invalidate_sky()
 {
     try
     {
-        if (!game::visengine.address) return;
-        const std::uint64_t rv = memory->read<std::uint64_t>(
-            game::visengine.address + Offsets::VisualEngine::RenderView);
-        if (!rv || (rv & 7)) return;
+        // Both chains to the render view: a stale VisualEngine field is the one
+        // reason a sky write lands in the instance and never reaches a frame.
+        const std::uint64_t rv = rbx::visualengine_t::render_view();
+        if (!rv) return;
         memory->write<unsigned char>(rv + Offsets::RenderView::SkyValid, 0);
     }
     catch (...) {}
@@ -998,8 +1194,9 @@ static void apply_sky()
         memory->write<float>(sky + Offsets::Sky::MoonAngularSize,
             std::min(60.f, std::max(0.f, settings::world::sky_slots::moon_angular)));
 
-        memory->write<float>(sky + Offsets::Sky::SkyboxOrientation,
-            settings::world::sky_slots::orientation[0]);
+        // The orientation belongs to the Skybox rows: writing it here too made
+        // two loops race for the same float, and the slower one won half the
+        // time.  Size only.
         invalidate_sky();
     }
     catch (...) {}
@@ -1353,10 +1550,15 @@ static void draw_snowflake_shape(ImDrawList* dl, float cx, float cy,
 }
 static float g_snow_acc = 0.f, g_rain_acc = 0.f;
 
+// Weather volume, in studs. The radius is measured from the world every frame
+// instead of being fixed, so the fall-off sits at the wall of whatever space the
+// player is in; the cap keeps it from spreading over half the map in the open.
 static float s_weather_radius = 46.f;
 static constexpr float k_weather_radius_min = 10.f;
 static constexpr float k_weather_radius_max = 46.f;
 
+// Particles actually drawn versus dropped by the V4 occlusion test, for the
+// diagnostic below.
 static int s_weather_drawn  = 0;
 static int s_weather_culled = 0;
 
@@ -1419,11 +1621,15 @@ void world_effects::render(float screen_w, float screen_h)
     bool do_rain = effects_3d::rain_mode > 0;
     bool snow_v2 = effects_3d::snow_mode >= 2;
     bool rain_v2 = effects_3d::rain_mode >= 2;
+    // V3 and up sample the real surface under each particle so weather lands on
+    // roofs; V4 additionally drops whatever a wall stands between us and it.
     const bool snow_elev = effects_3d::snow_mode >= 3;
     const bool rain_elev = effects_3d::rain_mode >= 3;
     const bool snow_occl = effects_3d::snow_mode >= 4;
     const bool rain_occl = effects_3d::rain_mode >= 4;
 
+    // Declared out here because the draw pass below is a separate block and needs
+    // the same two values.
     math::vector3 eye{ s_hrp_x, s_hrp_y, s_hrp_z };
     float         SPAWN_RADIUS = k_weather_radius_max;
 
@@ -1432,6 +1638,10 @@ void world_effects::render(float screen_w, float screen_h)
         float ground_y = sample_ground_y(dt);
         float cx = s_hrp_x, cz = s_hrp_z;
 
+        // Size the volume from the geometry in front of the camera: a small room
+        // gives a small volume, so the weather stops at its walls instead of
+        // spraying particles through them, and open ground grows it to the cap.
+        // Smoothed, or stepping past a corner would pop the whole volume.
         eye = worldgeo::eye_position(eye);
         const float want_radius = worldgeo::open_radius(eye, k_weather_radius_max);
         s_weather_radius += (want_radius - s_weather_radius) * std::min(1.f, dt * 4.f);
@@ -1439,6 +1649,8 @@ void world_effects::render(float screen_w, float screen_h)
 
         const float VIEW_HEIGHT  = 30.f;
 
+        // Caps follow the volume so a small opening gets fewer particles instead
+        // of the same count packed into it; the floor keeps a light drizzle alive.
         auto weather_cap = [&](float base) -> int
         {
             const float scale = (SPAWN_RADIUS / 50.f) * (SPAWN_RADIUS / 50.f);
@@ -1833,6 +2045,9 @@ void world_effects::render(float screen_w, float screen_h)
             }
         }
 
+        // Every few seconds while V3 or V4 is on, so it can be checked without
+        // guessing: a radius that never leaves the cap means the geometry snapshot
+        // is empty, and zero culls with V4 on means nothing is being occluded.
         if (snow_elev || rain_elev)
         {
             static auto s_weather_log = std::chrono::steady_clock::now() - std::chrono::seconds(10);

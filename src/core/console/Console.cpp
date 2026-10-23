@@ -315,7 +315,7 @@ void dump_crash_locked(unsigned long exit_code)
     CrashInfo info = classify_crash(exit_code);
     long long signed_code = (long long)(std::int32_t)exit_code;
 
-    log_locked(Color::White, "aether crash");
+    log_locked(Color::White, "jewsploit crash");
     {
         char body[160]{};
         std::snprintf(body, sizeof(body), "Exit code      0x%08lX (%lld)",
@@ -481,7 +481,7 @@ void DumpWorld()
 
     std::size_t players = PlayerHandler::GetPlayerCount();
 
-    Log(Color::White, "aether status");
+    Log(Color::White, "jewsploit status");
     Log(Color::Gray, "PID            %lu", (unsigned long)pid);
     Ptr(Color::Cyan, "Module", base);
     Ptr(Color::Yellow, "Front DM", front);

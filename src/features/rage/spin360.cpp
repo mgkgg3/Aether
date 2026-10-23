@@ -52,9 +52,9 @@ void rage::spin360::run()
 
 	while (true)
 	{
-
-
-
+		
+		
+		
 		live_state::set(live_state::kSpin360, spinning);
 
 		if (!settings::spin360::enabled || !game::datamodel.address) {

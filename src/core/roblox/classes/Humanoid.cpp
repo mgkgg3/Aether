@@ -80,7 +80,14 @@ std::string Cheat::Humanoid::GetDisplayName() const
 		return "Unknown";
 	}
 
-	return g_Memory.ReadString(address + Offsets::Humanoid::DisplayName);
+	// One hop, as above: the field holds the string, not the string's bytes.
+	const std::uint64_t text = g_Memory.Read<std::uint64_t>(address + Offsets::Humanoid::DisplayName);
+	if (!text || text == ~0ull)
+	{
+		return "Unknown";
+	}
+
+	return g_Memory.ReadString(text);
 }
 
 bool Cheat::Humanoid::IsWalking() const

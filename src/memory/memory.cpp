@@ -86,22 +86,22 @@ std::string memory_t::read_string(std::uint64_t address)
 	if (!address || !process_handle)
 		return "Unknown";
 
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	std::int32_t string_length = read<std::int32_t>(address + 0x10);
 
 	if (string_length <= 0 || string_length > 255)
 		return "Unknown";
 
-
-
+	
+	
 	std::uint64_t string_address = (string_length >= 16) ? read<std::uint64_t>(address) : address;
 	if (!string_address)
 		return "Unknown";
@@ -109,9 +109,9 @@ std::string memory_t::read_string(std::uint64_t address)
 	std::vector<char> buffer(static_cast<std::size_t>(string_length) + 1, 0);
 	Luck_ReadVirtualMemory(process_handle, reinterpret_cast<void*>(string_address), buffer.data(), buffer.size(), nullptr);
 
-
-
-
+	
+	
+	
 	if (buffer[0] == 0)
 		return "Unknown";
 
@@ -123,8 +123,8 @@ std::size_t memory_t::read_raw(std::uint64_t address, void* buffer, std::size_t 
 	if (!process_handle || !buffer || !size)
 		return 0;
 	SIZE_T read = 0;
-
-
+	
+	
 	const std::intptr_t st = Luck_ReadVirtualMemory(process_handle,
 		reinterpret_cast<void*>(address), buffer, static_cast<ULONG>(size),
 		reinterpret_cast<PULONG>(&read));
@@ -158,7 +158,7 @@ bool memory_t::free(std::uint64_t address, std::size_t )
 {
 	if (!process_handle || !address)
 		return false;
-
+	
 	return VirtualFreeEx(process_handle, reinterpret_cast<void*>(address), 0, MEM_RELEASE) != 0;
 }
 

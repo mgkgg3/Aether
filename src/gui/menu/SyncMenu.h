@@ -12,6 +12,10 @@ namespace sync
 	bool open();
 	void set_open(bool value);
 
+	// True while the overlay's intro card owns the screen.  The panel is held
+	// shut for it, and the menu key is ignored, so the card is what is seen.
+	bool intro_hold();
+
 	float fade();
 
 	void draw(ImVec2 display_size);

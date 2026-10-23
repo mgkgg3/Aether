@@ -32,6 +32,7 @@
 #include <features/chams/ShaderChams.h>
 #include <features/effects/Effects.h>
 #include <features/esp/Avatar.h>
+#include <render/ShapeDraw.h>
 #include <features/esp/BoxFill.h>
 #include <features/players/friends.h>
 #include <features/players/targets.h>
@@ -122,118 +123,160 @@ namespace helper
 		);
 	}
 
+	// Byte length of the UTF-8 sequence at p, clamped to end.  Player names are
+	// not ASCII, and stepping one byte at a time renders a multi-byte glyph as
+	// its individual lead bytes.
+	inline const char* utf8_step(const char* p, const char* end)
+	{
+		if (p >= end) return end;
+		const unsigned char c0 = static_cast<unsigned char>(*p);
+		int n = 1;
+		if ((c0 & 0xE0) == 0xC0) n = 2;
+		else if ((c0 & 0xF0) == 0xE0) n = 3;
+		else if ((c0 & 0xF8) == 0xF0) n = 4;
+		const char* q = p + n;
+		return q <= end ? q : end;
+	}
+
 	__forceinline void draw_text_outlined(ImDrawList* draw, ImFont* font, float font_size,
 		ImVec2 pos, ImU32 col, const char* text_begin, const char* text_end = nullptr)
 	{
+		if (!draw || !font || !text_begin) return;
+
+		const char* end = text_end ? text_end : text_begin + std::strlen(text_begin);
+		if (end == text_begin) return;
+
 		pos.x = roundf(pos.x);
 		pos.y = roundf(pos.y);
 
-		ImU32 outline_col = IM_COL32(0, 0, 0, 255);
-		ImDrawListFlags old_flags = draw->Flags;
-		draw->Flags &= ~ImDrawListFlags_AntiAliasedLines;
+		// One AddText per outline offset for the whole string, not one per glyph.
+		// The loop this replaces advanced a pixel past every character, which
+		// spread the glyphs out, and it sliced UTF-8 names into bytes.  A slightly
+		// transparent shadow still reads over a bright scene without the solid
+		// black mat the 255 alpha version left under each glyph.
+		const ImU32 shadow = IM_COL32(0, 0, 0, 205);
+		for (int ox = -1; ox <= 1; ox++)
+			for (int oy = -1; oy <= 1; oy++)
+				if (ox != 0 || oy != 0)
+					draw->AddText(font, font_size, ImVec2(pos.x + ox, pos.y + oy), shadow, text_begin, end);
 
-		const char* end = text_end ? text_end : text_begin + std::strlen(text_begin);
-		int len = static_cast<int>(end - text_begin);
-		if (len == 0) return;
-
-		float cx = pos.x;
-		for (int i = 0; i < len; i++)
-		{
-			const char* cb = text_begin + i;
-			const char* ce = text_begin + i + 1;
-			for (int ox = -1; ox <= 1; ox++)
-				for (int oy = -1; oy <= 1; oy++)
-					if (ox != 0 || oy != 0)
-						draw->AddText(font, font_size, ImVec2(cx + ox, pos.y + oy), outline_col, cb, ce);
-			float cw = font->CalcTextSizeA(font_size, FLT_MAX, 0.f, cb, ce).x;
-			draw->AddText(font, font_size, ImVec2(cx, pos.y), col, cb, ce);
-			cx += cw + 1.f;
-		}
-		draw->Flags = old_flags;
+		draw->AddText(font, font_size, pos, col, text_begin, end);
 	}
 
 	__forceinline void draw_text_blended(ImDrawList* draw, ImFont* font, float font_size,
 		ImVec2 pos, ImU32 col_start, ImU32 col_end,
 		const char* text_begin, const char* text_end = nullptr)
 	{
+		if (!draw || !font || !text_begin) return;
+
+		const char* end = text_end ? text_end : text_begin + std::strlen(text_begin);
+		if (end == text_begin) return;
+
 		pos.x = roundf(pos.x);
 		pos.y = roundf(pos.y);
 
-		ImU32 outline_col = IM_COL32(0, 0, 0, 255);
-		ImDrawListFlags old_flags = draw->Flags;
-		draw->Flags &= ~ImDrawListFlags_AntiAliasedLines;
+		const float sr = (float)((col_start >>  0) & 0xFF);
+		const float sg = (float)((col_start >>  8) & 0xFF);
+		const float sb = (float)((col_start >> 16) & 0xFF);
+		const float sa = (float)((col_start >> 24) & 0xFF);
+		const float er = (float)((col_end   >>  0) & 0xFF);
+		const float eg = (float)((col_end   >>  8) & 0xFF);
+		const float eb = (float)((col_end   >> 16) & 0xFF);
+		const float ea = (float)((col_end   >> 24) & 0xFF);
 
-		const char* end = text_end ? text_end : text_begin + std::strlen(text_begin);
-		int len = static_cast<int>(end - text_begin);
-		if (len == 0) return;
+		const ImU32 shadow = IM_COL32(0, 0, 0, 205);
+		const int len = static_cast<int>(end - text_begin);
 
-		float sr = (float)((col_start >>  0) & 0xFF);
-		float sg = (float)((col_start >>  8) & 0xFF);
-		float sb = (float)((col_start >> 16) & 0xFF);
-		float sa = (float)((col_start >> 24) & 0xFF);
-		float er = (float)((col_end   >>  0) & 0xFF);
-		float eg = (float)((col_end   >>  8) & 0xFF);
-		float eb = (float)((col_end   >> 16) & 0xFF);
-		float ea = (float)((col_end   >> 24) & 0xFF);
-
+		// Per glyph, because the gradient runs along the string, but each step is
+		// one UTF-8 sequence and the advance is exactly the glyph width: the old
+		// 1px-per-character padding is what made these labels look spaced out.
 		float cx = pos.x;
-		for (int i = 0; i < len; i++)
+		for (int i = 0; i < len; )
 		{
-			float t = len > 1 ? (float)i / (float)(len - 1) : 0.f;
-			ImU32 cc = IM_COL32(
+			const char* cb = text_begin + i;
+			const char* ce = utf8_step(cb, end);
+			const float t = len > 1 ? (float)i / (float)(len - 1) : 0.f;
+			const ImU32 cc = IM_COL32(
 				(int)(sr + (er - sr) * t), (int)(sg + (eg - sg) * t),
 				(int)(sb + (eb - sb) * t), (int)(sa + (ea - sa) * t));
-			const char* cb = text_begin + i;
-			const char* ce = text_begin + i + 1;
 			for (int ox = -1; ox <= 1; ox++)
 				for (int oy = -1; oy <= 1; oy++)
 					if (ox != 0 || oy != 0)
-						draw->AddText(font, font_size, ImVec2(cx + ox, pos.y + oy), outline_col, cb, ce);
-			float cw = font->CalcTextSizeA(font_size, FLT_MAX, 0.f, cb, ce).x;
+						draw->AddText(font, font_size, ImVec2(cx + ox, pos.y + oy), shadow, cb, ce);
 			draw->AddText(font, font_size, ImVec2(cx, pos.y), cc, cb, ce);
-			cx += cw + 1.f;
+			cx += font->CalcTextSizeA(font_size, FLT_MAX, 0.f, cb, ce).x;
+			i = static_cast<int>(ce - text_begin);
 		}
-		draw->Flags = old_flags;
 	}
 
 	__forceinline void box(ImVec2& c1, ImVec2& c2, ImU32 color, float thickness = 1.f)
 	{
-		c1.x = roundf(c1.x); c1.y = roundf(c1.y);
-		c2.x = roundf(c2.x); c2.y = roundf(c2.y);
+		if (shape::aa_on())
+		{
+			// The stroke sits on the pixel *centre* with the overlay's anti-aliasing
+			// on.  A 1 px line centred on an integer coordinate covers half of each
+			// of two columns - dull, and the whole of "the box looks dirty" - while
+			// the same line half a pixel along covers one column exactly, and the
+			// anti-aliasing then smooths the corners around it.
+			const float x0 = shape::snap_stroke(c1.x), y0 = shape::snap_stroke(c1.y);
+			const float x1 = shape::snap_stroke(c1.x + c2.x), y1 = shape::snap_stroke(c1.y + c2.y);
+			c1.x = x0; c1.y = y0;
+			c2.x = x1 - x0; c2.y = y1 - y0;
+		}
+		else
+		{
+			c1.x = roundf(c1.x); c1.y = roundf(c1.y);
+			c2.x = roundf(c2.x); c2.y = roundf(c2.y);
+		}
 		ImDrawList* draw = ImGui::GetBackgroundDrawList();
-		draw->Flags |= ImDrawListFlags_AntiAliasedLines;
+		shape::apply_flags(draw);
 		const float t = std::max(0.5f, thickness);
 		ImRect rect(c1.x, c1.y, c1.x + c2.x, c1.y + c2.y);
-		draw->AddRect(rect.Min, rect.Max, IM_COL32(0, 0, 0, color >> 24), 0.f, 0, t);
-		draw->AddRect({rect.Min.x - 1.f, rect.Min.y - 1.f}, {rect.Max.x + 1.f, rect.Max.y + 1.f}, color, 0.f, 0, t);
-		draw->AddRect({rect.Min.x - 2.f, rect.Min.y - 2.f}, {rect.Max.x + 2.f, rect.Max.y + 2.f}, IM_COL32(0, 0, 0, color >> 24), 0.f, 0, t);
+		// A solid black outline under the line, both centred on the same
+		// rectangle, so the box is one clean frame with a real edge on it: the
+		// translucent half-pixel rim that used to sit outside the box is what
+		// made it read as a blurred or dirty edge.
+		draw->AddRect(rect.Min, rect.Max, IM_COL32(0, 0, 0, 255), 0.f, 0, t + 2.f);
+		draw->AddRect(rect.Min, rect.Max, color, 0.f, 0, t);
 	}
 
 	__forceinline void corner_box(ImDrawList* draw, ImVec2 min, ImVec2 max, ImU32 col, float thickness = 1.f)
 	{
 		float x1 = roundf(min.x) - 1, y1 = roundf(min.y) - 1;
 		float x2 = roundf(max.x) + 1, y2 = roundf(max.y) + 1;
-		ImU32 oc = IM_COL32(0, 0, 0, 255);
+		// Each flag is its colour over its own solid black outline, a whole pixel
+		// wider on every side: an outline rather than a translucent hairline, so
+		// the corners stay crisp over a bright sky as well as a dark room.
+		const ImU32 oc = IM_COL32(0, 0, 0, 255);
+		const float e = 1.f;
 		float bw = x2 - x1, bh = y2 - y1;
-		float len = std::min(std::min(bw * 0.3f, bh * 0.3f), 15.f);
+		// The corner length is a share of the shorter side, capped so a huge box
+		// does not grow metre-long arms.  `box_corner_scale` is that share - it
+		// was declared and never read, which is why the row used to do nothing.
+		const float share = std::clamp(settings::visuals::box_corner_scale, 0.05f, 0.5f);
+		float len = std::min(std::min(bw * share, bh * share), 15.f);
 		len = std::max(len, 5.f);
 		float xl = x1 + len, yl = y1 + len, xr = x2 - len, yr = y2 - len;
-		draw->AddRectFilled({x1-1,y1-1},{xl+1,y1+thickness+1},oc);
-		draw->AddRectFilled({x1-1,y1-1},{x1+thickness+1,yl+1},oc);
-		draw->AddRectFilled({xr-1,y1-1},{x2+1,y1+thickness+1},oc);
-		draw->AddRectFilled({x2-thickness-1,y1-1},{x2+1,yl+1},oc);
-		draw->AddRectFilled({x1-1,y2-thickness-1},{xl+1,y2+1},oc);
-		draw->AddRectFilled({x1-1,yr-1},{x1+thickness+1,y2+1},oc);
-		draw->AddRectFilled({xr-1,y2-thickness-1},{x2+1,y2+1},oc);
-		draw->AddRectFilled({x2-thickness-1,yr-1},{x2+1,y2+1},oc);
-		draw->AddRectFilled({x1,y1},{xl,y1+thickness},col);
-		draw->AddRectFilled({x1,y1},{x1+thickness,yl},col);
-		draw->AddRectFilled({xr,y1},{x2,y1+thickness},col);
-		draw->AddRectFilled({x2-thickness,y1},{x2,yl},col);
-		draw->AddRectFilled({x1,y2-thickness},{xl,y2},col);
-		draw->AddRectFilled({x1,yr},{x1+thickness,y2},col);
-		draw->AddRectFilled({xr,y2-thickness},{x2,y2},col);
-		draw->AddRectFilled({x2-thickness,yr},{x2,y2},col);
+
+		// The eight flags go down in two passes - every outline, then every
+		// colour.  Drawn a flag at a time, the two flags that meet at a corner
+		// share a square, so one flag's outline is painted over the other's
+		// colour and each corner of the box reads as a black notch.  Two passes
+		// and the corner is one clean L.
+		const ImVec2 flag[8][2] = {
+			{ { x1, y1 },              { xl, y1 + thickness } },
+			{ { x1, y1 },              { x1 + thickness, yl } },
+			{ { xr, y1 },              { x2, y1 + thickness } },
+			{ { x2 - thickness, y1 },  { x2, yl } },
+			{ { x1, y2 - thickness },  { xl, y2 } },
+			{ { x1, yr },              { x1 + thickness, y2 } },
+			{ { xr, y2 - thickness },  { x2, y2 } },
+			{ { x2 - thickness, yr },  { x2, y2 } },
+		};
+		for (const auto& r : flag)
+			draw->AddRectFilled(ImVec2(r[0].x - e, r[0].y - e), ImVec2(r[1].x + e, r[1].y + e), oc);
+		for (const auto& r : flag)
+			draw->AddRectFilled(r[0], r[1], col);
 	}
 
 	inline float cross2d(const ImVec2& O, const ImVec2& A, const ImVec2& B)
@@ -288,6 +331,8 @@ struct esp_fade_t
 };
 static esp_fade_t g_fade;
 
+// Which colour an ESP element takes when it is not using its own: the explicit
+// aim target first, then a friend marked in the Players tab. Null means neither.
 enum arrow_tint_t : int { arrow_base = 0, arrow_aim, arrow_friend };
 
 static const float* highlight_colour(std::uint64_t instance, bool aim_target)
@@ -636,10 +681,10 @@ static void draw_part_chams(const cache::entity_t& entity,
 
 	int mode = settings::visuals::nchams_mode;
 	if (mode < 0) mode = 0;
-	if (mode > 3) mode = 3;
+	if (mode > 5) mode = 5;
 
 	const bool want_hit = !corpse_mode && settings::visuals::hit_chams &&
-		hit_fade > 0.001f && (mode == 2 || mode == 3);
+		hit_fade > 0.001f && mode >= 2;
 	if (!settings::visuals::nchams && !want_hit) return;
 
 	struct part_corners_t { ImVec2 pt[8]; bool full; };
@@ -807,6 +852,85 @@ static void draw_part_chams(const cache::entity_t& entity,
 		return;
 	}
 
+	// 5 Rig: a hull per part, filled, no union - the parts stay
+	// separate, which is what makes the seams show at the shoulders.
+	if (mode == 5)
+	{
+		glow_core();
+
+		for (const auto& hull : hulls)
+			if (hull.size() >= 3)
+				draw->AddConvexPolyFilled(hull.data(), (int)hull.size(), fill_col);
+
+		if (want_hit)
+		{
+			const float* hc = settings::visuals::hit_chams_color;
+			const ImU32 hit_col = IM_COL32((int)(hc[0] * 255.f), (int)(hc[1] * 255.f),
+				(int)(hc[2] * 255.f), (int)(std::min(1.f, hc[3] * hit_fade) * 255.f));
+			for (const auto& hull : hulls)
+				if (hull.size() >= 3)
+					draw->AddConvexPolyFilled(hull.data(), (int)hull.size(), hit_col);
+		}
+
+		draw->Flags = old_flags | ImDrawListFlags_AntiAliasedLines;
+		for (const auto& hull : hulls)
+			if (hull.size() >= 2)
+				draw->AddPolyline(hull.data(), (int)hull.size(), outline_col,
+					ImDrawFlags_Closed, 1.f);
+		draw->Flags = old_flags;
+		return;
+	}
+
+	// 4 Chains: one silhouette for the whole body, a dark underlay
+	// behind it, and an optional pulse in the fill.  The union is already
+	// computed for mode 2; what makes this one the is that the fill is
+	// the body rather than a stack of parts.
+	if (mode == 4)
+	{
+		glow_core();
+
+		const float* fc = fc_ptr;
+		float alpha = fc[3];
+		if (!corpse_mode && settings::visuals::nchams_pulse)
+		{
+			const float spd = std::clamp(settings::visuals::nchams_pulse_speed, 0.1f, 10.f);
+			const float ph  = (float)ImGui::GetTime() * spd * 6.2831853f;
+			alpha *= 0.55f + 0.45f * (0.5f + 0.5f * std::sin(ph));
+		}
+
+		const float pulse_fill[4]{ fc[0], fc[1], fc[2], alpha };
+		const ImU32 union_fill = override_hue ? fill_col : col_of(pulse_fill, 1.f);
+		const ImU32 underlay   = IM_COL32(0, 0, 0, 95);
+
+		for (const auto& piece : clipped)
+			draw->AddConvexPolyFilled(piece.data(), (int)piece.size(), underlay);
+		for (const auto& piece : clipped)
+			draw->AddConvexPolyFilled(piece.data(), (int)piece.size(), union_fill);
+
+		if (want_hit)
+		{
+			const float* hc = settings::visuals::hit_chams_color;
+			const ImU32 hit_col = IM_COL32((int)(hc[0] * 255.f), (int)(hc[1] * 255.f),
+				(int)(hc[2] * 255.f), (int)(std::min(1.f, hc[3] * hit_fade) * 255.f));
+			for (const auto& piece : clipped)
+				draw->AddConvexPolyFilled(piece.data(), (int)piece.size(), hit_col);
+		}
+
+		draw->Flags = old_flags | ImDrawListFlags_AntiAliasedLines;
+		// Neighbouring pieces share an edge, so the outline only goes down
+		// where a piece borders the outside - one continuous silhouette.
+		for (int i = 0; i < (int)clipped.size(); ++i)
+		{
+			const auto& piece = clipped[i];
+			const int n = (int)piece.size();
+			if (n < 2) continue;
+			for (int e = 0; e < n; ++e)
+				cham_outline_outside(draw, piece[e], piece[(e + 1) % n], clipped, i, outline_col);
+		}
+		draw->Flags = old_flags;
+		return;
+	}
+
 	if (mode == 3)
 	{
 		glow_core();
@@ -816,6 +940,8 @@ static void draw_part_chams(const cache::entity_t& entity,
 		int style = settings::visuals::nchams_shader_style;
 		if (style < 0 || style >= schams::StyleNameCount()) style = 0;
 
+		// The highlight colour travels in the override slot, which every shader style
+		// already understands - the aim-target palette only knows that one colour.
 		const float* override_col = corpse_mode ? corpse_col : highlight;
 
 		schams::DrawFill(draw, clipped, (float)ImGui::GetTime(), style,
@@ -1600,7 +1726,9 @@ static void select_esp_font(ImFont*& font, float& size)
 	case 5:  picked = aether::fonts::esp_display(want); break;
 	case 6:  picked = aether::fonts::esp_clear(want);   break;
 
-	case 7:  picked = aether::fonts::esp_inter();       break;
+	case 7:  picked = aether::fonts::esp_inter();        break;
+	case 8:  picked = aether::fonts::esp_inter_medium(); break;
+	case 9:  picked = aether::fonts::esp_inter_title();  break;
 	default: picked = nullptr;                 break;
 	}
 	if (picked) font = picked;
@@ -1705,13 +1833,27 @@ static void draw_china_hat(ImDrawList* draw, const math::vector3& head,
 	draw->Flags |= ImDrawListFlags_AntiAliasedFill | ImDrawListFlags_AntiAliasedLines;
 
 	const float soft = 2.f;
+
+	// The hat's three styles are one cone drawn three ways: a flat fan (Cone),
+	// a stitched cone with ribs and a brim ring (Ribbed), and a fan
+	// whose segments alternate with a turning phase (Pinwheel).
+	// `china_hat_style` was declared with all three documented and then never
+	// read, which is why the row did nothing.
+	const int hat_style = std::clamp(settings::visuals::china_hat_style, 0, 2);
+	const int hat_phase = hat_style == 2
+		? ((int)((float)ImGui::GetTime() * 6.f) & 1)
+		: 0;
+	const ImU32 fill_alt = IM_COL32((int)(col4[0] * 255.f), (int)(col4[1] * 255.f),
+		(int)(col4[2] * 255.f), (int)(col4[3] * 0.55f * 255.f));
+
 	for (int i = 0; i < k_hat_segs; ++i)
 	{
 		const int nxt = (i + 1) % k_hat_segs;
 		if (base[i].x < -9000.f || base[nxt].x < -9000.f) continue;
 		const float ang = 6.2831853f * (float)i / (float)k_hat_segs;
 		const ImVec2 apex_off{ apex.x + cosf(ang) * soft, apex.y + sinf(ang) * soft };
-		draw->AddTriangleFilled(apex_off, base[i], base[nxt], fill);
+		const ImU32 seg = (hat_style != 0 && ((i + hat_phase) & 1)) ? fill_alt : fill;
+		draw->AddTriangleFilled(apex_off, base[i], base[nxt], seg);
 	}
 	if (all_ok)
 		draw->AddConvexPolyFilled(base, k_hat_segs, base_col);
@@ -1720,6 +1862,15 @@ static void draw_china_hat(ImDrawList* draw, const math::vector3& head,
 		const int nxt = (i + 1) % k_hat_segs;
 		if (base[i].x < -9000.f || base[nxt].x < -9000.f) continue;
 		draw->AddLine(base[i], base[nxt], outline, 1.2f);
+	}
+
+	if (hat_style == 1 && all_ok)
+	{
+		for (int i = 0; i < k_hat_segs; i += 4)
+			draw->AddLine(apex, base[i], IM_COL32(0, 0, 0, 80), 2.2f);
+		for (int i = 0; i < k_hat_segs; i += 4)
+			draw->AddLine(apex, base[i], fill, 1.1f);
+		draw->AddPolyline(base, k_hat_segs, fill, ImDrawFlags_Closed, 1.6f);
 	}
 
 	draw->Flags = fl;
@@ -1837,9 +1988,159 @@ static void draw_look_direction(ImDrawList* draw, const math::vector3& head,
 	const float  th = std::max(0.5f, settings::visuals::look_direction_thickness);
 	const ImU32  col = helper::color_with_opacity(c[0], c[1], c[2], c[3], alpha);
 
-	draw->AddLine(ImVec2(a.x, a.y), ImVec2(b.x, b.y), IM_COL32(0, 0, 0, (int)(200.f * alpha)), th + 1.4f);
-	draw->AddLine(ImVec2(a.x, a.y), ImVec2(b.x, b.y), col, th);
-	draw->AddCircleFilled(ImVec2(b.x, b.y), th + 1.4f, col, 16);
+	// The mark is a *mark*, not the ray: the world length only decides which way
+	// the line points, and what is drawn along it is a short screen-space arrow.
+	// A line drawn to the world tip is as long as the distance the slider asks
+	// for, so at any real distance it crossed the head it is meant to annotate
+	// and kept going - the "look direction line is too long" it was called.
+	const float dx = b.x - a.x, dy = b.y - a.y;
+	const float dlen = std::sqrt(dx * dx + dy * dy);
+	if (dlen < 1.5f) return;
+
+	const float ux = dx / dlen, uy = dy / dlen;
+	const float len_px = std::clamp(settings::visuals::look_direction_length * 14.f, 20.f, 92.f);
+
+	const ImVec2 p0(a.x, a.y);
+	const ImVec2 mark_tip(a.x + ux * len_px, a.y + uy * len_px);
+
+	// Solid black under both parts, the same width plus a pixel: one clean mark
+	// over a bright sky as well as a dark room, and no second colour to keep in
+	// step with the first.
+	const ImU32 edge = IM_COL32(0, 0, 0, (int)(255.f * std::clamp(alpha, 0.f, 1.f) + 0.5f));
+
+	draw->AddLine(p0, mark_tip, edge, th + 1.6f);
+	draw->AddLine(p0, mark_tip, col, th);
+
+	// The head is one stroked path - a barb, the tip, the other barb - so the
+	// point is a join between two segments rather than two lines crossing, which
+	// is what leaves a spike sticking past the point of the arrow.
+	// A small head, not a flare: at a third of a shaft that is itself under 90 px
+	// the barbs read as a chevron wider than the line they are on the end of.
+	const float barb = std::min(len_px * 0.20f, 5.f);
+	constexpr float k_barb_angle = 0.50f;   // ~29 degrees off the shaft
+	const float ca = std::cos(k_barb_angle), sa = std::sin(k_barb_angle);
+
+	const ImVec2 q0(mark_tip.x - (ux * ca + uy * sa) * barb, mark_tip.y - (uy * ca - ux * sa) * barb);
+	const ImVec2 q1(mark_tip.x - (ux * ca - uy * sa) * barb, mark_tip.y - (uy * ca + ux * sa) * barb);
+
+	draw->PathClear();
+	draw->PathLineTo(q0);
+	draw->PathLineTo(mark_tip);
+	draw->PathLineTo(q1);
+	draw->PathStroke(edge, 0, th + 1.6f);
+	draw->PathStroke(col, 0, th);
+	draw->PathClear();
+}
+
+// ---------------------------------------------------------------------------
+// Skeleton rigs
+//
+// The dropdown used to list three renderings of one pair list, which is why it
+// read as "nothing happened" at any thickness: every entry walked the same
+// Aether bone-to-bone graph.  These are the five rigs, kept apart on purpose:
+//
+//   0 Lines   (Aether)      bone to bone, straight, one pass
+//   1 Chains      one polyline per limb, through every joint
+//   2 Joints   bones plus a disc at each joint, split by sight
+//   3 Rig           root/lower/upper spine, arms and legs off the spine
+//   4 Glow          the rig one step wider and faint underneath
+// ---------------------------------------------------------------------------
+namespace skel
+{
+	struct bone_t
+	{
+		ImVec2              a{};
+		ImVec2              b{};
+		const math::vector3* wa{};
+		const math::vector3* wb{};
+	};
+
+	struct rig_t
+	{
+		std::unordered_map<std::string, ImVec2>        screen;
+		std::unordered_map<std::string, math::vector3> world;
+		std::unordered_map<std::string, math::vector3> size;
+		std::unordered_map<std::string, math::matrix3> rot;
+		bool r15{ false };
+		bool r6{ false };
+
+		const math::vector3* w(const char* n) const
+		{
+			auto it = world.find(n);
+			return it == world.end() ? nullptr : &it->second;
+		}
+		const math::vector3* s(const char* n) const
+		{
+			auto it = size.find(n);
+			return it == size.end() ? nullptr : &it->second;
+		}
+		const math::matrix3* r(const char* n) const
+		{
+			auto it = rot.find(n);
+			return it == rot.end() ? nullptr : &it->second;
+		}
+	};
+
+	static bool project(const math::vector3& p, const math::vector2& dims,
+		const math::matrix4& view, ImVec2& out)
+	{
+		math::vector2 s{};
+		if (!game::visengine.world_to_screen(p, s, dims, view)) return false;
+		if (!std::isfinite(s.x) || !std::isfinite(s.y)) return false;
+		out = ImVec2{ s.x, s.y };
+		return true;
+	}
+
+	// One read per part.  The frames (size and rotation) are only fetched for
+	// the chains, because they are two extra reads per part per player and the
+	// other styles do not need them.
+	static void gather(const cache::entity_t& entity, const math::vector2& dims,
+		const math::matrix4& view, bool want_frames, rig_t& out)
+	{
+		for (const auto& kv : entity.parts)
+		{
+			const std::string& name = kv.first;
+			if (!kv.second.address) continue;
+			if (!is_valid_r15_part(name) && !is_r6_part(name)) continue;
+
+			rbx::primitive_t prim = kv.second.get_primitive();
+			if (!prim.address) continue;
+
+			const math::vector3 p = prim.get_position();
+			if (!math::finite(p)) continue;
+
+			out.world[name] = p;
+			ImVec2 sp{};
+			if (project(p, dims, view, sp)) out.screen[name] = sp;
+
+			if (!want_frames) continue;
+			const math::vector3 sz = prim.get_size();
+			const math::matrix3 rt = prim.get_rotation();
+			if (!math::finite(sz)) continue;
+			out.size[name] = sz;
+			out.rot[name]  = rt;
+		}
+
+		out.r15 = out.world.count("UpperTorso") > 0;
+		out.r6  = !out.r15 && out.world.count("Torso") > 0;
+	}
+
+	// A part's own long axis: the point y0 * height above its centre and the
+	// point y1 * height below it, rotated with the part.  An R6 limb is one
+	// rigid part, so this is the only way to get its angle right - the part's
+	// centre alone cannot tell a raised arm from a lowered one.
+	static bool axis(const rig_t& rig, const char* name, float y0, float y1,
+		const math::vector2& dims, const math::matrix4& view, ImVec2& a, ImVec2& b)
+	{
+		const math::vector3* p = rig.w(name);
+		const math::vector3* s = rig.s(name);
+		const math::matrix3* r = rig.r(name);
+		if (!p || !s || !r) return false;
+
+		if (!project(*p + (*r) * math::vector3{ 0.f, s->y * y0, 0.f }, dims, view, a)) return false;
+		if (!project(*p + (*r) * math::vector3{ 0.f, s->y * y1, 0.f }, dims, view, b)) return false;
+		return true;
+	}
 }
 
 void esp::run()
@@ -1906,6 +2207,10 @@ void esp::run()
 	g_fade.flags     = fade_tick(g_fade.flags,     settings::visuals::flags,       fi, fo);
 	g_fade.chams     = fade_tick(g_fade.chams,     settings::visuals::chams,       fi, fo);
 
+	// Before the early return: this origin is what every screen coordinate the
+	// overlay draws or aims with is built on, and with the enemy pass off the
+	// function leaves right here on the first frame - which is how the whole
+	// overlay came to sit a caption's height high and the aim landed above a head.
 	rbx::visualengine_t::update_window_offset();
 
 	if (!settings::visuals::enable_enemies && !settings::visuals::view_hitbox)
@@ -2101,8 +2406,18 @@ void esp::run()
 	for (auto& [a, hs] : g_hit_states)
 		hs.timer = std::max(0.f, hs.timer - dt);
 
+	// Anti-aliased lines, on.  This list used to clear the flag here - it is the
+	// same ImDrawList the boxes, the skeleton, the tracers and the aim curve are
+	// all drawn on, and the flag is sticky for the frame - which is the whole of
+	// "the lines are jagged": every stroke in the overlay, diagonal or not, was
+	// being rasterised with hard stepped edges while the setting that would have
+	// smoothed them sat enabled in the style.
+	//
+	// On top of that flag, the overlay's own anti-aliasing option brings the
+	// rest of it - the texture line path, the anti-aliased fills and the finer
+	// shapes (shape::apply_flags), set once here for the whole pass.
 	ImDrawList* draw = ImGui::GetBackgroundDrawList();
-	draw->Flags &= ~ImDrawListFlags_AntiAliasedLines;
+	shape::apply_flags(draw);
 	g_offscreen.clear();
 
 	for (auto& entity : snap)
@@ -2125,12 +2440,15 @@ void esp::run()
 		if (!is_local && is_dead_ent && !corpse_mode)
 		{ ++s_skipped_dead; ++st.dead; continue; }
 
+		// The players tab pin keeps the aim-target colour on them for as long as it
+		// is set, locked on or not; a live lock only adds to that.
 		const bool aim_target =
 			(entity.instance.address != 0) &&
 			(targets::is_target(entity.instance.address) ||
 				aimbot::player.instance.address == entity.instance.address ||
 				silentaim::state.target.instance.address == entity.instance.address);
 
+		// Friends stay lit for as long as they are friends; the aim target always wins.
 		const float* highlight = friend_of_mine || aim_target
 			? highlight_colour(entity.instance.address, aim_target)
 			: nullptr;
@@ -2187,7 +2505,16 @@ void esp::run()
 
 		if (settings::visuals::visible_check && !is_local && have_centre)
 		{
-			if (!worldgeo::is_visible(eye, centre))
+			// Head to root, not one ray through the middle of the body: a player
+			// peeking over a crate or leaning out from a corner is visible, and
+			// the centre ray dropped the whole player for a wall between you and
+			// their chest.
+			math::vector3 head{};
+			const bool visible = find_head_world(entity, head) && (head - centre).length() > 0.5f
+				? worldgeo::is_body_visible(eye, head, centre)
+				: worldgeo::is_visible(eye, centre);
+
+			if (!visible)
 			{
 				++s_skipped_visible;
 				++st.visible;
@@ -2601,6 +2928,46 @@ void esp::run()
 			const float* bc = corpse_mode ? settings::visuals::corpse_color : settings::visuals::box_color;
 			const float* box_src = (!corpse_mode && highlight) ? highlight : bc;
 			ImU32 col = helper::color_with_opacity(box_src[0], box_src[1], box_src[2], box_src[3], g_fade.box);
+
+			// Health colour: the box takes the same three-stop ramp the health bar
+			// uses, so the frame and the bar tell one story instead of two.  An aim
+			// target keeps its highlight - that colour is an answer to a different
+			// question.
+			if (settings::visuals::box_health_color && !corpse_mode && !highlight)
+			{
+				const float p = std::clamp(hp_pct, 0.f, 1.f);
+				static const math::vector3 low{ 1.f, 0.16f, 0.16f };
+				static const math::vector3 mid{ 1.f, 0.65f, 0.f };
+				static const math::vector3 high{ 0.20f, 1.f, 0.35f };
+				const math::vector3 c = p < 0.5f
+					? low + (mid - low) * (p * 2.f)
+					: mid + (high - mid) * ((p - 0.5f) * 2.f);
+				col = helper::color_with_opacity(c.x, c.y, c.z, box_src[3], g_fade.box);
+			}
+			else if (settings::visuals::box_team_color && !corpse_mode && !highlight && entity.team_color)
+			{
+				// The player's own team colour, packed the way the client keeps it.
+				const std::uint32_t tc = entity.team_color;
+				col = helper::color_with_opacity(
+					(float)((tc >> 16) & 0xFF) / 255.f,
+					(float)((tc >> 8) & 0xFF) / 255.f,
+					(float)(tc & 0xFF) / 255.f,
+					box_src[3], g_fade.box);
+			}
+
+			const int bstyle = std::clamp(settings::visuals::box_style, 0, 2);
+
+			// the shadow goes down first: a solid black copy two pixels
+			// down and right, not a blur, so it reads as a drop shadow at any
+			// distance and costs one more box.
+			if (bstyle == 1)
+			{
+				ImVec2 shadow_pos{ c1.x + 2.f, c1.y + 2.f };
+				helper::box(shadow_pos, c2,
+					IM_COL32(0, 0, 0, (int)(150.f * g_fade.box)),
+					settings::visuals::box_thickness + 0.5f);
+			}
+
 			if (settings::visuals::box_type == 0)
 			{
 				helper::box(c1, c2, col, settings::visuals::box_thickness);
@@ -2614,10 +2981,31 @@ void esp::run()
 				actual_box_left  = roundf(rb.Min.x);
 				actual_box_right = roundf(rb.Max.x);
 			}
+
+			// The double box: a thinner copy inset by three pixels, same
+			// shape as the outer one - the gap is the effect.
+			if (bstyle == 2)
+			{
+				ImRect inner(c1.x + 3.f, c1.y + 3.f, c1.x + c2.x - 3.f, c1.y + c2.y - 3.f);
+				if (inner.Max.x > inner.Min.x + 2.f && inner.Max.y > inner.Min.y + 2.f)
+				{
+					const float t = std::max(1.f, settings::visuals::box_thickness * 0.7f);
+					if (settings::visuals::box_type == 0)
+					{
+						ImVec2 inner_size{ inner.Max.x - inner.Min.x, inner.Max.y - inner.Min.y };
+						helper::box(inner.Min, inner_size, col, t);
+					}
+					else
+						helper::corner_box(draw, inner.Min, inner.Max, col, t);
+				}
+			}
 		}
 
 		if (!is_local && !corpse_mode && settings::visuals::tracer && g_fade.tracer > 0.f)
 		{
+			// The box is in world_to_screen's space, so each origin here has to be
+			// as well: the viewport centre, its top and bottom edge, and the real
+			// pointer rather than ImGui's client-relative MousePos.
 			const float ccx = rbx::visualengine_t::window_offset_x() + dims.x * 0.5f;
 			const float ccy = rbx::visualengine_t::window_offset_y() + dims.y * 0.5f;
 			const float cty = rbx::visualengine_t::window_offset_y();
@@ -2636,13 +3024,58 @@ void esp::run()
 			case 3:  from = { ccx, cty }; break;
 			default: from = { ccx, cby }; break;
 			}
-			const ImVec2 to = { box_cx, box_bot };
+			// Where the line lands on the target.  Feet is the bottom of the box -
+			// the classic anchor, and the one that reads correctly from above,
+			// where a line to the head appears to hang in the air over the body.
+			const ImVec2 to =
+				settings::visuals::tracer_end == 1 ? ImVec2(box_cx, (box_top + box_bot) * 0.5f)
+				: settings::visuals::tracer_end == 2 ? ImVec2(box_cx, box_top)
+				                                    : ImVec2(box_cx, box_bot);
+
 			auto& tc = settings::visuals::tracer_color;
 			const float* trace_src = highlight ? highlight : tc;
 			const ImU32 col = helper::color_with_opacity(trace_src[0], trace_src[1], trace_src[2],
 				trace_src[3], g_fade.tracer);
-			draw->AddLine(from, to, IM_COL32(0, 0, 0, 200), 2.5f);
-			draw->AddLine(from, to, col, 1.0f);
+
+			// Solid black under the line, both centred on the same two points, and
+			// only as wide as the line plus a pixel: an outline instead of a
+			// translucent shadow offset a pixel down.  The width is the user's -
+			// a 2.4 px band under a 1.0 px hairline was the "thick and dark" the
+			// tracer was called for.
+			const float th = std::max(0.5f, std::min(settings::visuals::tracer_thickness, 12.f));
+
+			if (settings::visuals::tracer_style == 1)
+			{
+				// The smooth style: a tapered band with round caps and a fade
+				// toward the target, so the line thins and dims as it arrives
+				// instead of stopping dead.  Same colour, same width at the
+				// origin - it is one shape, so it has no join to show.
+				const ImU32 tip = helper::color_with_opacity(trace_src[0], trace_src[1], trace_src[2],
+					trace_src[3] * 0.45f, g_fade.tracer);
+				if (settings::visuals::tracer_outline)
+					shape::tapered_band(draw, from, to, th + 1.6f,
+						IM_COL32(0, 0, 0, 255), IM_COL32(0, 0, 0, 160), 0.55f);
+				shape::tapered_band(draw, from, to, th, col, tip, 0.55f);
+			}
+			else if (settings::visuals::tracer_style == 2)
+			{
+				// Beam: a stack of three widths.  The outline the
+				// other styles carry would fight the glow, so the stack is the
+				// outline.
+				shape::beam_line(draw, from, to, th, col);
+			}
+			else if (settings::visuals::tracer_style == 3)
+			{
+				// Laser: travelling dashes, so the line reads as a
+				// direction rather than only as a link.
+				shape::laser_line(draw, from, to, th, col, (float)ImGui::GetTime());
+			}
+			else
+			{
+				if (settings::visuals::tracer_outline)
+					draw->AddLine(from, to, IM_COL32(0, 0, 0, 255), th + 1.4f);
+				draw->AddLine(from, to, col, th);
+			}
 		}
 
 		if (!corpse_mode && settings::visuals::china_hat && g_fade.china_hat > 0.f)
@@ -2690,56 +3123,83 @@ void esp::run()
 
 			const float bar_alpha = std::clamp(settings::visuals::healthbar_opacity / 100.f, 0.f, 1.f);
 			float tr = 255.f * g_fade.healthbar;
-			float bar_h = box_h + 2.f;
 
 			float bar_tp = std::max(0.f, box_top - 2.f);
 			float bar_bt = std::min(dims.y, box_bot + 2.f);
 			if (bar_bt > bar_tp + 2.f)
 			{
-				if (settings::visuals::healthbar_enhanced)
-				{
+				const int hb_style = std::clamp(settings::visuals::healthbar_style, 0, 3);
 
-					const float w   = std::clamp(settings::visuals::healthbar_width, 2.f, 24.f);
-					const float x   = box_left - w - 5.f;
-					const float top = bar_tp;
-					const float bot = bar_bt;
-					const float rnd = w * 0.5f;
+				const float w   = std::clamp(settings::visuals::healthbar_width, 2.f, 24.f);
+				const float x   = box_left - w - 5.f;
+				const float top = bar_tp;
+				const float bot = bar_bt;
+				const float rnd = (hb_style == 1 || hb_style == 2) ? w * 0.5f : 0.f;
 
-					const ImU32 track = IM_COL32(10, 10, 12, (int)(tr * 0.85f * bar_alpha));
-					const ImU32 edge  = IM_COL32(255, 255, 255, (int)(tr * 0.20f * bar_alpha));
+				const ImU32 fill_c = IM_COL32((int)(r*255),(int)(g*255),(int)(b*255),(int)(tr * bar_alpha));
+				const ImU32 track  = IM_COL32(10, 10, 12, (int)(tr * 0.85f * bar_alpha));
+				const ImU32 edge   = IM_COL32(255, 255, 255, (int)(tr * 0.20f * bar_alpha));
 
-					if (settings::visuals::healthbar_glow)
-						draw->AddRectFilled({x - 3.f, top - 2.f}, {x + w + 3.f, bot + 2.f},
-							IM_COL32((int)(r*255),(int)(g*255),(int)(b*255),(int)(tr * 0.18f * bar_alpha)), rnd + 3.f);
+				if (settings::visuals::healthbar_glow)
+					draw->AddRectFilled({x - 3.f, top - 2.f}, {x + w + 3.f, bot + 2.f},
+						IM_COL32((int)(r*255),(int)(g*255),(int)(b*255),(int)(tr * 0.18f * bar_alpha)), rnd + 3.f);
 
+				// 3 fattens the black backing instead of the bar: a
+				// solid alley behind the fill, so a pale map cannot wash it out.
+				const float back = hb_style == 3 ? 3.f : 1.f;
+				draw->AddRectFilled({x - back, top - back}, {x + w + back, bot + back},
+					IM_COL32(0, 0, 0, (int)(tr * bar_alpha)), rnd);
+
+				if (hb_style == 2)
 					draw->AddRectFilled({x, top}, {x + w, bot}, track, rnd);
+				if (hb_style != 3)
 					draw->AddRect({x, top}, {x + w, bot}, edge, rnd, 0, 1.f);
 
-					if (pct > 0.f)
-					{
-						const float room   = bot - top - 2.f;
-						const float fill_h = std::max(1.f, room * pct);
-						const float fy0    = bot - 1.f - fill_h;
-						const float fy1    = bot - 1.f;
-						const float irnd   = std::max(0.f, rnd - 1.f);
-						const ImU32 fill_col = IM_COL32((int)(r*255),(int)(g*255),(int)(b*255),(int)(tr * bar_alpha));
-						draw->AddRectFilled({x + 1.f, fy0}, {x + w - 1.f, fy1}, fill_col, irnd);
+				if (pct > 0.f)
+				{
+					const float room   = bot - top - 2.f;
+					const float fill_h = std::max(1.f, room * pct);
+					const float fy0    = bot - 1.f - fill_h;
+					const float fy1    = bot - 1.f;
+					const float irnd   = std::max(0.f, rnd - 1.f);
 
+					if (hb_style == 1)
+					{
+						// A gradient fill from the colour up to a lighter
+						// version of it, with a bright head sitting on the surface.
+						const ImU32 head = IM_COL32(
+							(int)(std::min(1.f, r * 0.6f + 0.4f) * 255.f),
+							(int)(std::min(1.f, g * 0.6f + 0.4f) * 255.f),
+							(int)(std::min(1.f, b * 0.6f + 0.4f) * 255.f),
+							(int)(tr * bar_alpha));
+						draw->AddRectFilledMultiColor({x + 1.f, fy0}, {x + w - 1.f, fy1},
+							head, head, fill_c, fill_c);
 						draw->AddRectFilled({x + 1.f, fy0}, {x + w - 1.f, fy0 + std::min(2.f, fill_h)},
-							IM_COL32(255, 255, 255, (int)(tr * 0.7f * bar_alpha)), irnd);
+							IM_COL32(255, 255, 255, (int)(tr * 0.85f * bar_alpha)), irnd);
+					}
+					else
+					{
+						draw->AddRectFilled({x + 1.f, fy0}, {x + w - 1.f, fy1}, fill_c, irnd);
+						if (settings::visuals::healthbar_enhanced)
+							draw->AddRectFilled({x + 1.f, fy0}, {x + w - 1.f, fy0 + std::min(2.f, fill_h)},
+								IM_COL32(255, 255, 255, (int)(tr * 0.7f * bar_alpha)), irnd);
 					}
 				}
-				else
+
+				// The armour bar: the same shape, stacked above the health
+				// strip, so the two read as one gauge.
+				if (settings::visuals::armorbar && entity.armor >= 0.f && entity.max_armor > 0.f)
 				{
-					draw->AddRectFilled({box_left-7.f, bar_tp}, {box_left-3.f, bar_bt},
-						IM_COL32(0,0,0,(int)(tr * bar_alpha)));
-					if (pct > 0.f)
+					const float apct = std::clamp(entity.armor / entity.max_armor, 0.f, 1.f);
+					auto& ac = settings::visuals::armorbar_color;
+					const float ay0 = top - 6.f;
+					const float ay1 = top - 3.f;
+					if (ay0 > 0.f && apct > 0.f)
 					{
-						float fill = std::min(bar_h * pct, bar_bt - bar_tp);
-						draw->AddRectFilled(
-							{box_left-6.f, bar_bt - 1.f - fill},
-							{box_left-4.f, bar_bt - 1.f},
-							IM_COL32((int)(r*255),(int)(g*255),(int)(b*255),(int)(tr * bar_alpha)));
+						draw->AddRectFilled({x - back, ay0 - back}, {x + w + back, ay1 + back},
+							IM_COL32(0, 0, 0, (int)(tr * bar_alpha)), rnd);
+						draw->AddRectFilled({x, ay1 - (ay1 - ay0) * apct}, {x + w, ay1},
+							IM_COL32((int)(ac[0]*255),(int)(ac[1]*255),(int)(ac[2]*255),(int)(tr * bar_alpha)));
 					}
 				}
 			}
@@ -3012,74 +3472,256 @@ void esp::run()
 		bool do_hit_skel = !corpse_mode && settings::visuals::hit_skeleton && hit_flash > 0.f;
 		if (do_skel || do_hit_skel)
 		{
+			// The menu lists the rigs with Aether first, so its index is not the
+			// renderer's old numbering.  Aether is the one this tree is built
+			// around: one stroke per limb, the joints as bends in the stroke.
+			//
+			//   0 Aether -> 1,  1 Lines -> 0,  2 Joints -> 2,
+			//   3 Bones  -> 3,  4 Glow  -> 4
+			//
+			// Keeping Aether at index 0 also means a config from the build that
+			// forced the glow rig (it wrote 0) opens on Aether rather than on a
+			// bare line list nobody chose.
+			static constexpr int k_style_map[] = { 1, 0, 2, 3, 4 };
+			const int pick  = std::clamp(settings::visuals::skeleton_style, 0, 4);
+			const int style = k_style_map[pick];
+
+			// Chains and the rig walk the part names; the R6 chain also
+			// needs each limb's own size and rotation to find its angle.
+			const bool want_frames = do_skel && style == 1 && entity.parts.count("Torso") > 0;
+
+			skel::rig_t rig{};
+			skel::gather(entity, dims, view, want_frames, rig);
+
 			std::unordered_map<std::string, ImVec2> bmap;
-
-			const bool named_rig = entity.parts.count("UpperTorso") > 0 ||
-			                       entity.parts.count("Torso") > 0;
-
-			if (named_rig)
-			{
-				for (auto& [nm, part] : entity.parts)
-				{
-					if (!part.address) continue;
-					rbx::primitive_t prim = part.get_primitive();
-					if (!prim.address) continue;
-					math::vector2 s{};
-					if (game::visengine.world_to_screen(prim.get_position(), s, dims, view))
-						bmap[nm] = {s.x, s.y};
-				}
-			}
-
-			const BonePair* pairs = nullptr; int cnt = 0;
 			std::vector<BonePair> generic;
-			if (entity.parts.count("UpperTorso") > 0) { pairs = k_r15; cnt = (int)(sizeof(k_r15)/sizeof(k_r15[0])); }
-			else if (named_rig) { pairs = k_r6; cnt = (int)(sizeof(k_r6)/sizeof(k_r6[0])); }
+			const BonePair* pairs = nullptr;
+			int cnt = 0;
+
+			if (rig.r15)      { bmap = rig.screen; pairs = k_r15; cnt = (int)(sizeof(k_r15) / sizeof(k_r15[0])); }
+			else if (rig.r6)  { bmap = rig.screen; pairs = k_r6;  cnt = (int)(sizeof(k_r6)  / sizeof(k_r6[0])); }
 			else
 			{
-
 				cnt = build_generic_skeleton(entity, bmap, generic, dims, view);
 				pairs = generic.empty() ? nullptr : generic.data();
 			}
 
+			auto at = [&](const char* n, ImVec2& o) -> bool
+			{
+				auto it = bmap.find(n);
+				if (it == bmap.end()) return false;
+				o = it->second;
+				return true;
+			};
+
+			std::vector<skel::bone_t>        bones;
+			std::vector<std::vector<ImVec2>> chains;
+
 			if (pairs)
 			{
-				ImDrawListFlags old = draw->Flags;
-				draw->Flags &= ~ImDrawListFlags_AntiAliasedLines;
-				float thick = settings::visuals::skeleton_thickness;
+				for (int i = 0; i < cnt; ++i)
+				{
+					ImVec2 a{}, b{};
+					if (!at(pairs[i].a, a) || !at(pairs[i].b, b)) continue;
+					bones.push_back({ a, b, rig.w(pairs[i].a), rig.w(pairs[i].b) });
+				}
+			}
 
-				auto lerp_col = [](const float* base, const float* hit, float t) -> ImU32 {
-					return IM_COL32(
-						(int)((base[0]+(hit[0]-base[0])*t)*255.f),
-						(int)((base[1]+(hit[1]-base[1])*t)*255.f),
-						(int)((base[2]+(hit[2]-base[2])*t)*255.f),
-						(int)((base[3]+(hit[3]-base[3])*t)*255.f));
+			// 1 Chains: one polyline per limb, so the elbow and the
+			// knee are a bend in a stroke rather than two strokes that meet.
+			if (style == 1 || style == 3 || style == 4)
+			{
+				auto chain = [&](std::initializer_list<const char*> names)
+				{
+					std::vector<ImVec2> pts;
+					for (const char* n : names)
+					{
+						ImVec2 p{};
+						if (!at(n, p)) break;
+						pts.push_back(p);
+					}
+					if (pts.size() >= 2) chains.push_back(std::move(pts));
 				};
 
-				static const float white[4]{1,1,1,1};
-				const float* base_c = do_skel
-					? (corpse_mode ? settings::visuals::corpse_color : settings::visuals::skeleton_color)
-					: white;
-				const float* hit_c  = settings::visuals::hit_skeleton_color;
-
-				ImU32 line_col = do_hit_skel
-					? lerp_col(do_skel ? base_c : hit_c, hit_c, hit_flash)
-					: IM_COL32((int)(base_c[0]*255),(int)(base_c[1]*255),(int)(base_c[2]*255),(int)(base_c[3]*255));
-
-				for (int i = 0; i < cnt; i++)
+				if (rig.r15)
 				{
-					auto ia = bmap.find(pairs[i].a), ib = bmap.find(pairs[i].b);
-					if (ia == bmap.end() || ib == bmap.end()) continue;
-					if (do_skel && settings::visuals::skeleton_outline) {
-						auto& oc = settings::visuals::skeleton_outline_color;
-						draw->AddLine(ia->second, ib->second,
-							IM_COL32((int)(oc[0]*255),(int)(oc[1]*255),(int)(oc[2]*255),255),
-							thick + 2.f);
-					}
-					draw->AddLine(ia->second, ib->second, line_col,
-						thick + (do_hit_skel ? hit_flash * 1.5f : 0.f));
+					chain({ "Head", "UpperTorso", "LowerTorso" });
+					chain({ "UpperTorso", "LeftUpperArm", "LeftLowerArm", "LeftHand" });
+					chain({ "UpperTorso", "RightUpperArm", "RightLowerArm", "RightHand" });
+					chain({ "LowerTorso", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot" });
+					chain({ "LowerTorso", "RightUpperLeg", "RightLowerLeg", "RightFoot" });
 				}
-				draw->Flags = old;
+				else if (rig.r6 && style == 1)
+				{
+					// The R6 torso has no neck, shoulder or hip part to anchor
+					// to, so they are derived off the torso's own frame: the
+					// shoulders a third of the way up, the hips two fifths down.
+					ImVec2 head{}, torso{}, sh{}, hip{}, shL{}, shR{}, hipL{}, hipR{};
+					const math::vector3* tp = rig.w("Torso");
+					const math::vector3* ts = rig.s("Torso");
+					const math::matrix3* tr = rig.r("Torso");
+
+					bool ok = at("Head", head) && tp && ts && tr &&
+						skel::project(*tp, dims, view, torso);
+
+					if (ok)
+					{
+						const math::vector3 shoulder_w = *tp + (*tr) * math::vector3{ 0.f, ts->y * 0.30f, 0.f };
+						const math::vector3 hip_w      = *tp - (*tr) * math::vector3{ 0.f, ts->y * 0.40f, 0.f };
+						const math::vector3 half       = (*tr) * math::vector3{ ts->x * 0.5f, 0.f, 0.f };
+
+						ok = skel::project(shoulder_w, dims, view, sh) &&
+						     skel::project(hip_w, dims, view, hip) &&
+						     skel::project(shoulder_w + half, dims, view, shL) &&
+						     skel::project(shoulder_w - half, dims, view, shR) &&
+						     skel::project(hip_w + half, dims, view, hipL) &&
+						     skel::project(hip_w - half, dims, view, hipR);
+					}
+
+					if (ok)
+					{
+						chains.push_back({ head, torso });
+
+						auto limb = [&](const char* part, float y0, float y1,
+							const ImVec2& root, const ImVec2& joint)
+						{
+							std::vector<ImVec2> pts{ root, joint };
+							ImVec2 a{}, b{};
+							if (skel::axis(rig, part, y0, y1, dims, view, a, b))
+							{
+								pts.push_back(a);
+								pts.push_back(b);
+							}
+							chains.push_back(std::move(pts));
+						};
+
+						limb("Left Arm",   0.20f, -0.50f, torso, shL);
+						limb("Right Arm",  0.20f, -0.50f, torso, shR);
+
+						chains.push_back({ torso, hip });
+
+						limb("Left Leg",   0.45f, -0.50f, hip, hipL);
+						limb("Right Leg",  0.45f, -0.50f, hip, hipR);
+					}
+				}
 			}
+
+			// Everything but the chains falls back to the bone list, which is
+			// the Aether graph - and the fallback for a rig the chains cannot
+			// read (a custom rig with no named limbs).
+			if (style != 1 && style != 3 && style != 4) chains.clear();
+
+			ImDrawListFlags old = draw->Flags;
+			draw->Flags = old | ImDrawListFlags_AntiAliasedLines;
+
+			float thick = settings::visuals::skeleton_thickness;
+
+			auto lerp_col = [](const float* base, const float* hit, float t) -> ImU32 {
+				return IM_COL32(
+					(int)((base[0]+(hit[0]-base[0])*t)*255.f),
+					(int)((base[1]+(hit[1]-base[1])*t)*255.f),
+					(int)((base[2]+(hit[2]-base[2])*t)*255.f),
+					(int)((base[3]+(hit[3]-base[3])*t)*255.f));
+			};
+
+			static const float white[4]{1,1,1,1};
+			const float* base_c = do_skel
+				? (corpse_mode ? settings::visuals::corpse_color : settings::visuals::skeleton_color)
+				: white;
+			const float* hit_c  = settings::visuals::hit_skeleton_color;
+
+			ImU32 line_col = do_hit_skel
+				? lerp_col(do_skel ? base_c : hit_c, hit_c, hit_flash)
+				: IM_COL32((int)(base_c[0]*255),(int)(base_c[1]*255),(int)(base_c[2]*255),(int)(base_c[3]*255));
+
+			const float bone_thick = thick + (do_hit_skel ? hit_flash * 1.5f : 0.f);
+			const bool  use_chains = !chains.empty();
+
+			auto stroke = [&](ImU32 c, float t)
+			{
+				if (use_chains)
+				{
+					for (auto& ch : chains)
+						draw->AddPolyline(ch.data(), (int)ch.size(), c, 0, t);
+				}
+				else
+				{
+					for (auto& b : bones) draw->AddLine(b.a, b.b, c, t);
+				}
+			};
+
+			// 4 Glow: the rig one step wider and faint underneath.  It
+			// goes down first so the outline still separates the bones from the
+			// scene rather than the halo sitting on top of them.
+			if (do_skel && style == 4)
+				stroke(shape::fade_alpha(line_col, 0.26f), bone_thick + 5.f);
+
+			if (do_skel && settings::visuals::skeleton_outline)
+			{
+				auto& oc = settings::visuals::skeleton_outline_color;
+				const ImU32 outline = IM_COL32((int)(oc[0]*255), (int)(oc[1]*255),
+					(int)(oc[2]*255), (int)(oc[3]*255));
+				stroke(outline, bone_thick + 1.6f);
+			}
+
+			// 2 Joints: with Visible Check on, each bone is cut
+			// into segments and the ones behind geometry take the hidden
+			// colour - the same split that tree makes down every limb.
+			if (do_skel && style == 2 && !do_hit_skel && settings::visuals::visible_check && !bones.empty())
+			{
+				const int seg = std::clamp(settings::visuals::skeleton_vis_segments, 1, 24);
+				const float* hc = settings::visuals::skeleton_hidden_color;
+				const ImU32 hidden = IM_COL32((int)(hc[0]*255), (int)(hc[1]*255),
+					(int)(hc[2]*255), (int)(hc[3]*255));
+
+				for (auto& b : bones)
+				{
+					if (!b.wa || !b.wb)
+					{
+						draw->AddLine(b.a, b.b, line_col, bone_thick);
+						continue;
+					}
+
+					for (int i = 0; i < seg; ++i)
+					{
+						const float t0 = (float)i / (float)seg;
+						const float t1 = (float)(i + 1) / (float)seg;
+						const ImVec2 p0{ b.a.x + (b.b.x - b.a.x) * t0, b.a.y + (b.b.y - b.a.y) * t0 };
+						const ImVec2 p1{ b.a.x + (b.b.x - b.a.x) * t1, b.a.y + (b.b.y - b.a.y) * t1 };
+						const math::vector3 mid = *b.wa + (*b.wb - *b.wa) * ((t0 + t1) * 0.5f);
+						draw->AddLine(p0, p1, worldgeo::is_visible(eye, mid) ? line_col : hidden, bone_thick);
+					}
+				}
+			}
+			else
+			{
+				stroke(line_col, bone_thick);
+			}
+
+			// The discs that close the bends.  This tree rounds its joints on
+			// purpose; the other four do not, which is why it is its own entry
+			// and not a toggle on `Lines`.
+			if (do_skel && style == 2 && settings::visuals::skeleton_joints)
+			{
+				const float jr = std::max(bone_thick * 0.5f,
+					settings::visuals::skeleton_joint_size * 0.5f);
+
+				if (use_chains)
+				{
+					for (auto& ch : chains)
+						for (auto& p : ch) draw->AddCircleFilled(p, jr, line_col, 8);
+				}
+				else
+				{
+					for (auto& b : bones)
+					{
+						draw->AddCircleFilled(b.a, jr, line_col, 8);
+						draw->AddCircleFilled(b.b, jr, line_col, 8);
+					}
+				}
+			}
+
+			draw->Flags = old;
 		}
 
 		bool do_chams     = !corpse_mode && settings::visuals::chams && g_fade.chams > 0.f;
@@ -3115,12 +3757,23 @@ void esp::run()
 
 	if (settings::visuals::offscreen_arrows && g_fade.arrows > 0.f && !g_offscreen.empty())
 	{
+		// Same space as the boxes, so the ring is centred on the viewport rather
+		// than on the corner of the client it happens to sit in.
 		const ImVec2 center(rbx::visualengine_t::window_offset_x() + dims.x * 0.5f,
 		                    rbx::visualengine_t::window_offset_y() + dims.y * 0.5f);
 		const float max_rx = std::max(40.f, dims.x * 0.5f - 18.f);
 		const float max_ry = std::max(40.f, dims.y * 0.5f - 18.f);
 		const float rmax   = std::max(max_rx, max_ry);
 		float radius = std::max(40.f, settings::visuals::arrow_radius);
+		if (settings::visuals::arrow_use_fov_radius)
+		{
+			// The arrows ride the aim's own circle instead of a hand-tuned ring:
+			// the radius the FOV circle draws, ten pixels outside it.  This is the
+			// switch that was declared and never read.
+			const float fov_r = settings::silentaim::enabled
+				? settings::silentaim::fov : settings::aimbot::fov;
+			radius = std::max(40.f, fov_r + 10.f);
+		}
 		if (radius > rmax) radius = rmax;
 		const float size  = std::max(6.f, settings::visuals::arrow_size);
 		ImFont* arrow_font = nullptr;
@@ -3155,14 +3808,88 @@ void esp::run()
 				tip_y = center.y + (tip_y - center.y) * sc;
 			}
 
-			const ImVec2 tip(tip_x, tip_y);
+			ImVec2 tip(tip_x, tip_y);
 			const float px = -dy, py = dx;
-			const ImVec2 pa(tip.x - dx * size + px * size * 0.55f, tip.y - dy * size + py * size * 0.55f);
-			const ImVec2 pb(tip.x - dx * size - px * size * 0.55f, tip.y - dy * size - py * size * 0.55f);
 			const ImU32 col = a.tint == arrow_aim ? aim_col
 				: (a.tint == arrow_friend ? friend_col : base_col);
-			draw->AddTriangleFilled(tip, pa, pb, col);
-			draw->AddTriangle(tip, pa, pb, IM_COL32(0, 0, 0, 200), 1.0f);
+
+			if (alpha > 0.004f)
+			{
+				const int style = settings::visuals::arrow_style;
+				const ImU32 edge = IM_COL32(0, 0, 0, 255);
+
+				if (style == 1)
+				{
+					// Arrow: a triangular head with a shaft, so the
+					// direction is readable from the shaft as well as the point.
+					const float shaft = size * 1.7f;
+					const ImVec2 base(tip.x - dx * size * 1.05f, tip.y - dy * size * 1.05f);
+					const ImVec2 tail(tip.x - dx * (size + shaft), tip.y - dy * (size + shaft));
+					const ImVec2 pa(base.x + px * size * 0.52f, base.y + py * size * 0.52f);
+					const ImVec2 pb(base.x - px * size * 0.52f, base.y - py * size * 0.52f);
+					draw->AddLine(tail, base, edge, size * 0.40f + 1.6f);
+					draw->AddLine(tail, base, col, size * 0.40f);
+					draw->AddTriangleFilled(ImVec2(tip.x + dx, tip.y + dy),
+						ImVec2(pa.x + dx, pa.y + dy), ImVec2(pb.x + dx, pb.y + dy), edge);
+					draw->AddTriangleFilled(tip, pa, pb, col);
+				}
+				else if (style == 2)
+				{
+					// Pointer: a slim kite with a thin tail.
+					const ImVec2 base(tip.x - dx * size * 1.4f, tip.y - dy * size * 1.4f);
+					const ImVec2 pa(base.x + px * size * 0.34f, base.y + py * size * 0.34f);
+					const ImVec2 pb(base.x - px * size * 0.34f, base.y - py * size * 0.34f);
+					draw->AddLine(base, ImVec2(base.x - dx * size, base.y - dy * size), col, 1.f);
+					draw->AddTriangleFilled(ImVec2(tip.x + dx, tip.y + dy),
+						ImVec2(pa.x + dx, pa.y + dy), ImVec2(pb.x + dx, pb.y + dy), edge);
+					draw->AddTriangleFilled(tip, pa, pb, col);
+				}
+				else if (style == 3)
+				{
+					// Ring: a bearing mark rather than a pointing shape.
+					const float r = size * 0.62f;
+					draw->AddCircle(tip, r + 1.f, edge, 24, 2.6f);
+					draw->AddCircle(tip, r, col, 24, 1.6f);
+					draw->AddCircleFilled(tip, std::max(1.f, size * 0.16f), col, 12);
+					draw->AddLine(tip, ImVec2(tip.x + dx * size * 1.35f, tip.y + dy * size * 1.35f), col, 1.4f);
+				}
+				else if (style == 4)
+				{
+					// Orbit: the arrow rides the FOV ring instead of
+					// the screen edge, ten pixels outside it, so where it sits
+					// answers "is this outside the circle I care about" rather
+					// than "which edge of the monitor is it nearest".
+					POINT pt{};
+					const ImVec2 oc = GetCursorPos(&pt) ? ImVec2((float)pt.x, (float)pt.y) : center;
+					const float fov_r = std::max(12.f, settings::silentaim::enabled
+						? settings::silentaim::fov : settings::aimbot::fov);
+
+					tip = ImVec2(oc.x + dx * (fov_r + 10.f), oc.y + dy * (fov_r + 10.f));
+
+					const ImVec2 pa(tip.x - dx * size + px * size * 0.55f, tip.y - dy * size + py * size * 0.55f);
+					const ImVec2 pb(tip.x - dx * size - px * size * 0.55f, tip.y - dy * size - py * size * 0.55f);
+
+					// Round-joined outline under a filled head: the reference
+					// draws the hint first and the fill on top of it.
+					draw->AddTriangle(tip, pa, pb, IM_COL32(0, 0, 0, (int)(alpha * 220.f)), 4.f);
+					draw->AddTriangleFilled(tip, pa, pb, col);
+					draw->AddTriangle(tip, pa, pb, col, 1.5f);
+				}
+				else
+				{
+					const ImVec2 pa(tip.x - dx * size + px * size * 0.55f, tip.y - dy * size + py * size * 0.55f);
+					const ImVec2 pb(tip.x - dx * size - px * size * 0.55f, tip.y - dy * size - py * size * 0.55f);
+					// A padded dark triangle under the arrow instead of a one-pixel
+					// stroke around it: the stroke left a jagged black hairline that
+					// reads as dirt at this size.
+					const float ss = size + 1.4f;
+					const ImVec2 tip2(tip.x + dx * 1.2f, tip.y + dy * 1.2f);
+					const ImVec2 pa2(tip2.x - dx * ss + px * ss * 0.55f, tip2.y - dy * ss + py * ss * 0.55f);
+					const ImVec2 pb2(tip2.x - dx * ss - px * ss * 0.55f, tip2.y - dy * ss - py * ss * 0.55f);
+					draw->AddTriangleFilled(tip2, pa2, pb2, edge);
+					draw->AddTriangleFilled(tip, pa, pb, col);
+				}
+			}
 
 			if (!a.info.empty())
 			{
@@ -3185,6 +3912,11 @@ bool esp::screen_anchor(std::uint64_t instance, float& cx, float& top)
 	if (!instance)
 		return false;
 
+	// What the plate has to clear is measured off the drawing pass, not guessed:
+	// the name sits at box_top - font - 5 and the avatar bust is 2.4 * font tall
+	// centred on that row, so it reaches box_top - 1.7 * font - 5. Adding the two
+	// together (what this used to do) parked the plate above furniture that was
+	// not drawn, and with only the avatar on it landed inside the bust.
 	const float font = settings::visuals::esp_font_size > 4.f
 		? (float)settings::visuals::esp_font_size
 		: ImGui::GetFontSize();
@@ -3244,6 +3976,9 @@ bool esp::screen_anchor(std::uint64_t instance, float& cx, float& top)
 	if (!game::visengine.world_to_screen(head, sp, dims, view))
 		return false;
 
+	// The top of the head, not a flat 34 px above its centre: the plate hangs off
+	// the geometry that is on screen, and the head is 1 stud tall in R15 and 1.2 in
+	// R6. The constant survives only for a part whose size cannot be read.
 	float top_y = sp.y - 34.f;
 	if (std::isfinite(head_size.y) && head_size.y > 0.2f && head_size.y < 8.f)
 	{
@@ -3261,6 +3996,10 @@ bool esp::screen_anchor(std::uint64_t instance, float& cx, float& top)
 	return true;
 }
 
+// Where the aim itself is pointing on that player, in the same screen space the
+// rest of the overlay draws in: Head first, then the head hitbox some games name
+// themselves, then the root. The aim line ends here so it lands on the player
+// instead of on the template above them.
 bool esp::aim_anchor(std::uint64_t instance, float& cx, float& cy)
 {
 	if (!instance || !game::visengine.address)

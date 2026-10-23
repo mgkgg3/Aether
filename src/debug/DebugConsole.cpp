@@ -168,6 +168,11 @@ namespace debug
 
 	void status(const char* label, const char* fmt, ...)
 	{
+		// emit() takes a va_list - a pointer to the argument slots, not an
+		// argument. Pre-formatting into a buffer and passing that buffer as the
+		// va_list compiles cleanly on x64 (va_list IS char*) but makes emit
+		// treat the first bytes of the text as the '%s' pointer. Forward the
+		// real va_list instead.
 		va_list a; va_start(a, fmt);
 		emit(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE, label, fmt, a, true);
 		va_end(a);

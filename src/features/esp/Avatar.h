@@ -6,6 +6,9 @@
 
 namespace avatar
 {
+	// Roblox thumbnails are fetched once per user id per kind and kept in a
+	// small D3D11 texture cache. The bust is what the ESP preview wants; the
+	// head shot is what the round slots (sidebar, home, nearby) want.
 
 	void init(ID3D11Device* device);
 

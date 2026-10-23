@@ -11,52 +11,83 @@ namespace sync
 	bool gate_wants_mouse();
 	inline constexpr const char* kBrandName = "aether";
 
+	// The rectangle on the overlay that samples the backdrop: the panel while it
+	// is up, plus the watermark card and every open plate, in client pixels, with
+	// `pad` pixels of margin around them.  Returns false when nothing that draws
+	// the glass is on screen, which is the case the capture is skipped in.
+	bool hud_backdrop_rect(float pad, float& x0, float& y0, float& x1, float& y1,
+		bool include_panel = false);
 
+	// Whether the panel is on screen now, and where it would be regardless.
+	//
+	// The glass uses the pair to decide when it may take a capture: while the
+	// panel is up and the overlay is visible to capture, a capture would hand
+	// back the panel itself, so the image is held instead.
+	bool panel_visible();
+	bool panel_rect(float pad, float& x0, float& y0, float& x1, float& y1);
+
+	// The glass asked for a frame it can use.  While the panel has no frost yet
+	// and the panel is the thing in the way, the menu leaves the panel off the
+	// screen for that frame (`note_panel_blank`), the capture runs on what is
+	// left, and the next frame draws the panel onto the frost it just took.  It
+	// is how the blur works without hiding the overlay from every capture API-
+	// Hide From Captures stays the user's switch, and only that switch.
+	void note_panel_blank(bool blank);
+	bool panel_blanked();
+
+	// Called by the settings page while the backdrop's own sliders are on screen.
+	// Only there does the glass borrow the capture exclusion, so Blur and Tint
+	// move the frame they are dragged on; with the section off screen the frame
+	// is held instead and the panel stays in screenshots and recordings.
+	void note_backdrop_settings();
+	bool backdrop_settings_visible();
+
+	
 	struct State
 	{
 		int  menu_key       = 0x2D;
-
-
-
-
-
+		
+		
+		
+		
+		
 		bool dim_background = true;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
 		bool  place_notice_pending = false;
 		bool  place_notice_done    = false;
 		bool  place_ignore_last    = false;
@@ -66,45 +97,45 @@ namespace sync
 		char  client_version[64]{};
 		unsigned long long place_id = 0;
 
+		
+		
 
 
+		
+		
 
 
-
-
-
-
-
-
-
+		
+		
+		
 		float glass_transparency = 45.f;
 
-
+		
 		bool wm_show = true;
 		bool wm_fps  = true;
 		bool wm_time = true;
 
-
-
-
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
+		
+		
+		
 		bool  kb_show    = true;
-		bool  kb_mode    = true;
-		bool  kb_only_active = false;
+		bool  kb_mode    = true;    
+		bool  kb_only_active = false;  
 		float kb_x = 16.f, kb_y = 150.f;
 
-
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
+		
 		bool  th_show   = true;
 		bool  th_avatar = true;
 		bool  th_name   = true;
@@ -113,51 +144,51 @@ namespace sync
 		float th_x = 16.f, th_y = 320.f;
 		float th_scale = 1.f;
 
-
-
+		
+		
 		std::vector<std::string> cfg_names;
 		int cfg_selected = 0;
 	};
 
-
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	struct Backdrop
 	{
-		ImTextureID image = (ImTextureID)0;
-		float tex_w = 0.f, tex_h = 0.f;
+		ImTextureID image = (ImTextureID)0;   
+		float tex_w = 0.f, tex_h = 0.f;       
 		float desktop_x = 0.f, desktop_y = 0.f;
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
 		float image_scale = 1.f;
 
-
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
+		
 		bool capture_has_self = true;
 
 		bool ready() const { return image != (ImTextureID)0 && tex_w > 0.f && tex_h > 0.f; }
 
-
-
-
+		
+		
+		
 		ImVec2 uv(float wx, float wy, float window_x, float window_y) const
 		{
 			const float s = image_scale > 0.05f ? image_scale : 1.f;
@@ -172,19 +203,19 @@ namespace sync
 		return b;
 	}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	struct Occlusion
 	{
 		int   n = 0;
@@ -193,9 +224,9 @@ namespace sync
 		{
 			if (n >= 8 || !(x1 > x0) || !(y1 > y0))
 				return;
-
-
-
+			
+			
+			
 			for (int i = 0; i < n; ++i)
 				if (rect[i][0] == x0 && rect[i][1] == y0 && rect[i][2] == x1 && rect[i][3] == y1)
 					return;
@@ -216,12 +247,12 @@ namespace sync
 		return s;
 	}
 
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
 	enum class PreviewJoint : int
 	{
 		Head = 0, Neck, Chest, Pelvis, LegsBase,
@@ -237,21 +268,21 @@ namespace sync
 		bool  valid = false;
 		char  name[64]{};
 		float health = 100.f;
-		float distance = 0.f;
-		int   rig_type = 0;
-
-
-
+		float distance = 0.f;      
+		int   rig_type = 0;        
+		
+		
+		
 		int   state = -1;
 		char  tool[48]{};
-
-
+		
+		
 		long long user_id = 0;
 		float joints[kPreviewJointCount][3]{};
 	};
 
-
-
+	
+	
 	struct PlayerRow
 	{
 		long long user_id = 0;
@@ -259,25 +290,25 @@ namespace sync
 		char  name[64]{};
 		char  display_name[64]{};
 		char  team[32]{};
-
+		
 		char  tool[48]{};
-
+		
 		int   account_age_days = -1;
 		float health = 0.f;
 		float max_health = 100.f;
-		float distance = 0.f;
+		float distance = 0.f;           
 		int   rig_type = 0;
 		bool  teammate = false;
-
-
+		
+		
 		bool  enemy = false;
 		bool  dead = false;
 		bool  local = false;
 		bool  valid = false;
 	};
 
-
-
+	
+	
 	enum class PlayerStatus : int
 	{
 		Dead = 0, Friend, Teammate, Self, Neutral, Enemy
@@ -298,62 +329,63 @@ namespace sync
 
 	inline constexpr int kMaxPlayerRows = 128;
 
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	struct SessionInfo
 	{
 		unsigned long long place_id = 0;
 		unsigned long long game_id  = 0;
 		char  place_name[64]{};
 		char  game_name[64]{};
-		float uptime_s = 0.f;
+		float uptime_s = 0.f;             
 		float ping_ms  = -1.f;
 		int   players  = 0;
 		int   max_players = 0;
-		long long local_user_id = 0;
+		long long local_user_id = 0;      
 		char  local_name[64]{};
 		char  local_handle[64]{};
 		bool  attached = false;
+		bool  loaded   = false;           // attached *and* the local character exists
 	};
 
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	struct SonarInfo
 	{
-		bool  active   = false;
-		bool  has_ping = false;
+		bool  active   = false;    
+		bool  has_ping = false;    
 		char  name[64]{};
-		float distance = 0.f;
+		float distance = 0.f;      
 		float health   = 0.f;
-		float bearing  = 0.f;
-		float sweep    = 0.f;
-		float glow     = 0.f;
+		float bearing  = 0.f;      
+		float sweep    = 0.f;      
+		float glow     = 0.f;      
 	};
 
 	struct AimSample
 	{
-		float t = 0.f;
+		float t = 0.f;                    
 		float raw_yaw = 0.f, raw_pitch = 0.f;
 		float step_yaw = 0.f, step_pitch = 0.f;
 		float smoothing_x = 1.f, smoothing_y = 1.f;
-		float dist = 0.f;
-		bool  primary = false;
+		float dist = 0.f;                 
+		bool  primary = false;            
 	};
 
 	struct Hooks
@@ -367,95 +399,97 @@ namespace sync
 		const char* (*theme_name)(int) = nullptr;
 		void (*theme_apply)(int) = nullptr;
 
-
-
+		
+		
 		bool (*preview_rig)(PreviewRig& out) = nullptr;
 
-
-
+		
+		
 		bool (*preview_avatar)(ImDrawList* dl, long long user_id,
 			ImVec2 min, ImVec2 max, ImU32 tint) = nullptr;
 
-
+		
 		bool (*player_avatar)(ImDrawList* dl, long long user_id,
 			ImVec2 min, ImVec2 max, ImU32 tint) = nullptr;
 
-
-
-
-
+		
+		
+		
+		
 		bool (*player_avatar_rounded)(ImDrawList* dl, long long user_id,
 			ImVec2 min, ImVec2 max, ImU32 tint, float rounding) = nullptr;
 
-
-
-
+		
+		
+		
 		bool (*session)(SessionInfo& out) = nullptr;
 
-
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
+		
 		bool (*sonar_info)(SonarInfo& out) = nullptr;
 
-
+		
 		int (*players_snapshot)(void* out, int max) = nullptr;
 
-
-
-
+		
+		
+		
 		int (*player_account_age)(unsigned long long instance) = nullptr;
 
-
-
+		
+		
 		bool (*player_spectate)(unsigned long long instance, bool on) = nullptr;
 
-
+		
 		bool (*player_teleport)(unsigned long long instance) = nullptr;
 
-
-
+		
+		
 		void (*player_target)(unsigned long long instance) = nullptr;
 
-
-
-
+		
+		
+		
 		unsigned long long (*aim_target_instance)() = nullptr;
 
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
 		bool (*player_hud_anchor)(unsigned long long instance, float& cx, float& top) = nullptr;
 
+		// The aim line's end: the point the aim is on, not the furniture over it
+		// (see esp::aim_anchor).
 		bool (*player_aim_anchor)(unsigned long long instance, float& cx, float& cy) = nullptr;
 
 
-
+		
 		bool (*chams_pass)() = nullptr;
 
 		bool (*fill_image)(const char* path, bool remove_bg) = nullptr;
 
 		void (*shutdown)() = nullptr;
 
-
-
-
-
+		
+		
+		
+		
 		void (*explorer_page)(ImVec2 pos, ImVec2 size) = nullptr;
 
-
-
-
+		
+		
+		
 		void (*lua_run)(const char* source) = nullptr;
 
-
-
+		
+		
 		bool (*local_player)(char* name, int n, char* handle, int m) = nullptr;
 	};
 

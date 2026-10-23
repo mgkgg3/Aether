@@ -8,21 +8,25 @@
 #include <sdk/offsets.h>
 #include <memory/memory.h>
 #include <game/game.h>
+#include <debug/DebugConsole.h>
 #include <features/opone/OperationOne.h>
 
 std::string rbx::nameable_t::get_name() const
 {
+	
+	
+	
+	// 0x68 (Offsets::Instance::NameContainer) is the string itself in this
+	// client - the character pointer, not a container with the pointer at +0.
+	// Reading it directly is the dump's own method and saves a dereference.
+	uintptr_t name = memory->read<uintptr_t>(this->address + Offsets::Instance::NameContainer);
 
-
-
-	uintptr_t name_container = memory->read<uintptr_t>(this->address + Offsets::Instance::NameContainer);
-
-	if (!name_container || name_container == ~0ull)
+	if (!name || name == ~0ull)
 	{
 		return "invalid_str";
 	}
 
-	return memory->read_string(name_container + Offsets::Instance::Name);
+	return memory->read_string(name);
 }
 
 std::string rbx::nameable_t::get_class_name() const
@@ -44,13 +48,13 @@ std::vector<rbx::instance_t> rbx::interface_t::get_children() const
 	std::vector<rbx::instance_t> children;
 	if (!base->address) return children;
 
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
 	std::uint64_t start{ memory->read<std::uint64_t>(base->address + Offsets::Instance::ChildrenStart) };
 	std::uint64_t end{ memory->read<std::uint64_t>(start + Offsets::Instance::ChildrenEnd) };
 
@@ -115,10 +119,10 @@ std::uint64_t rbx::player_t::get_team() const
 	catch (...) { return 0; }
 	if (!team) return 0;
 
-
-
-
-
+	
+	
+	
+	
 	try
 	{
 		if (rbx::instance_t(team).get_class_name() == "Team")
@@ -152,18 +156,18 @@ float rbx::humanoid_t::get_max_health() const
 
 int rbx::humanoid_t::get_state() const
 {
-
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	const std::uint64_t state_machine =
 		memory->read<std::uint64_t>(this->address + Offsets::Humanoid::HumanoidState);
 
@@ -265,6 +269,36 @@ math::vector2 rbx::visualengine_t::get_dimensions() const
 	return memory->read<math::vector2>(this->address + Offsets::VisualEngine::Dimensions);
 }
 
+// The render view, from either chain that reaches it.
+//
+// The VisualEngine field is the direct one and the one every dump names.  The
+// DataModel walk is the same one the projection scan above already uses
+// (DataModel -> +0x1c0 -> +0x8 -> +0x28); it is here so a stale VisualEngine
+// field - which is what a client whose layout moved leaves behind - does not
+// turn every sky and lighting write into a no-op the caller cannot diagnose.
+std::uint64_t rbx::visualengine_t::render_view()
+{
+	auto usable = [](std::uint64_t p) { return p >= 0x10000ull && p < 0x7fffffffffffull && !(p & 7); };
+
+	if (game::visengine.address)
+	{
+		const std::uint64_t rv = memory->read<std::uint64_t>(
+			game::visengine.address + Offsets::VisualEngine::RenderView);
+		if (usable(rv)) return rv;
+	}
+
+	if (game::datamodel.address)
+	{
+		std::uint64_t rv = memory->read<std::uint64_t>(
+			game::datamodel.address + Offsets::DataModel::ToRenderView1);
+		rv = usable(rv) ? memory->read<std::uint64_t>(rv + Offsets::DataModel::ToRenderView2) : 0;
+		rv = usable(rv) ? memory->read<std::uint64_t>(rv + Offsets::DataModel::ToRenderView3) : 0;
+		if (usable(rv)) return rv;
+	}
+
+	return 0;
+}
+
 
 
 
@@ -303,8 +337,8 @@ namespace
 		math::vector3 right{};
 		math::vector3 up{};
 		math::vector3 fwd{};
-		float         tan_x{ 1.f };
-		float         tan_y{ 1.f };
+		float         tan_x{ 1.f };   
+		float         tan_y{ 1.f };   
 	};
 
 	constexpr float k_default_fov = 1.22173f;
@@ -323,16 +357,16 @@ namespace
 		if (!math::finite(f) || !math::finite(u) || !math::finite(r)) return false;
 		if (f.length() < 0.5f || u.length() < 0.5f || r.length() < 0.5f) return false;
 
-
-
-
-
-
-
-
-
-
-
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
 		const math::vector3 fr = f.normalized(), ur = u.normalized(), rr = r.normalized();
 		if (std::fabs(fr.dot(ur)) > 0.05f || std::fabs(fr.dot(rr)) > 0.05f ||
 			std::fabs(ur.dot(rr)) > 0.05f)
@@ -341,8 +375,8 @@ namespace
 		float fov = memory->read<float>(cam + Offsets::Camera::FieldOfView);
 		if (!(fov > 0.05f && fov < 3.10f)) fov = k_default_fov;
 
-
-
+		
+		
 		math::vector2 dims = memory->read<math::vector2>(
 			game::visengine.address + Offsets::VisualEngine::Dimensions);
 		float aspect = 1.7778f;
@@ -359,8 +393,8 @@ namespace
 		return true;
 	}
 
-
-
+	
+	
 	math::matrix4 make_view_projection(const cam_snapshot_t& cs)
 	{
 		math::matrix4 m{};
@@ -371,9 +405,9 @@ namespace
 		m.m[0][3] = -cs.right.dot(cs.pos) * kx;
 		m.m[1][0] = cs.up.x * ky;    m.m[1][1] = cs.up.y * ky;    m.m[1][2] = cs.up.z * ky;
 		m.m[1][3] = -cs.up.dot(cs.pos) * ky;
-
-
-
+		
+		
+		
 		m.m[2][0] = -cs.fwd.x;       m.m[2][1] = -cs.fwd.y;       m.m[2][2] = -cs.fwd.z;
 		m.m[2][3] =  cs.fwd.dot(cs.pos);
 		m.m[3][0] =  cs.fwd.x;       m.m[3][1] =  cs.fwd.y;       m.m[3][2] =  cs.fwd.z;
@@ -390,17 +424,17 @@ namespace
 		return std::isfinite(ndc.x) && std::isfinite(ndc.y);
 	}
 
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	bool describe_view_projection(const math::matrix4& m, const cam_snapshot_t& cs,
 		float aspect, float& out_tan_x, float& out_tan_y)
 	{
@@ -433,9 +467,9 @@ namespace
 		return true;
 	}
 
-	std::atomic<std::uintptr_t> s_proj_object{ 0 };
-	std::atomic<std::uintptr_t> s_proj_offset{ 0 };
-	std::atomic<float>          s_cal_tan_x{ 0.f };
+	std::atomic<std::uintptr_t> s_proj_object{ 0 };    
+	std::atomic<std::uintptr_t> s_proj_offset{ 0 };    
+	std::atomic<float>          s_cal_tan_x{ 0.f };    
 	std::atomic<float>          s_cal_tan_y{ 0.f };
 	std::atomic<bool>           s_native_active{ false };
 	std::atomic<bool>           s_scan_busy{ false };
@@ -444,21 +478,21 @@ namespace
 
 	auto tick_ms = [] { return (std::uint64_t)GetTickCount64(); };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	constexpr std::uint64_t k_last_basis_ms = 400;
 
 	std::mutex          s_last_cam_mtx;
@@ -486,12 +520,12 @@ namespace
 		return true;
 	}
 
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
 	bool looks_like_projection(const math::matrix4& m)
 	{
 		bool any_non_zero = false;
@@ -520,7 +554,7 @@ namespace
 		if (!(r_len > 0.5f && r_len < 40.f) || !(u_len > 0.5f && u_len < 40.f))
 			return false;
 
-
+		
 		const float dot = rx * ux + ry * uy + rz * uz;
 		return std::fabs(dot) < r_len * u_len * 0.05f;
 	}
@@ -530,8 +564,8 @@ namespace
 	{
 		if (!base) return false;
 
-
-
+		
+		
 		constexpr std::size_t k_span = 0x2000;
 		alignas(16) float block[16];
 
@@ -556,9 +590,9 @@ namespace
 		return false;
 	}
 
-
-
-
+	
+	
+	
 	bool scan_for_view_projection(std::uintptr_t ve)
 	{
 		cam_snapshot_t cs{};
@@ -567,15 +601,15 @@ namespace
 
 		const float aspect = cs.tan_x / cs.tan_y;
 
-
-
-
+		
+		
+		
 		std::uintptr_t windows[4]{ ve, 0, 0, 0 };
 		std::uint32_t  count = 1;
 
-
-
-
+		
+		
+		
 		auto usable = [](std::uintptr_t p) { return p > 0x10000ull && p < 0x7fffffff0000ull; };
 
 		if (usable(ve))
@@ -606,10 +640,10 @@ namespace
 		return true;
 	}
 
-
-
-
-
+	
+	
+	
+	
 	bool resolve_native_view_projection(math::matrix4& out)
 	{
 		const std::uintptr_t obj = s_proj_object.load();
@@ -622,9 +656,9 @@ namespace
 		cam_snapshot_t cs{};
 		if (!build_cam_snapshot(cs))
 		{
-
-
-
+			
+			
+			
 			if (!looks_like_projection(m))
 				return false;
 			out = m;
@@ -634,8 +668,8 @@ namespace
 		float tx = 0.f, ty = 0.f;
 		if (!describe_view_projection(m, cs, cs.tan_x / cs.tan_y, tx, ty))
 		{
-
-
+			
+			
 			s_proj_offset.store(0);
 			s_proj_object.store(0);
 			return false;
@@ -645,12 +679,12 @@ namespace
 		return true;
 	}
 
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
 	bool read_documented_view_projection(math::matrix4& out)
 	{
 		const std::uintptr_t ve = game::visengine.address;
@@ -678,17 +712,17 @@ std::uintptr_t rbx::visualengine_t::native_projection_offset()
 
 math::matrix4 rbx::visualengine_t::get_viewmatrix() const
 {
-
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	if (op1::engine_matrix_enabled())
 	{
 		auto note = [](const char* source) { op1::publish_matrix_source(source); };
@@ -707,10 +741,10 @@ math::matrix4 rbx::visualengine_t::get_viewmatrix() const
 			return native;
 		}
 
-
-
-
-
+		
+		
+		
+		
 		const std::uintptr_t ve = this->address ? this->address : game::visengine.address;
 
 		static std::uintptr_t s_last_ve_op1 = 0;
@@ -740,16 +774,16 @@ math::matrix4 rbx::visualengine_t::get_viewmatrix() const
 		}
 	}
 
-
-
-
-
-
-
-
-
-
-
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	cam_snapshot_t cs{};
 	if (build_cam_snapshot(cs))
 	{
@@ -760,17 +794,17 @@ math::matrix4 rbx::visualengine_t::get_viewmatrix() const
 		return make_view_projection(cs);
 	}
 
-
-
-
+	
+	
+	
 	if (recall_camera_basis(cs))
 	{
 		s_native_active.store(false, std::memory_order_relaxed);
 		return make_view_projection(cs);
 	}
 
-
-
+	
+	
 	math::matrix4 native{};
 	if (resolve_native_view_projection(native))
 	{
@@ -784,14 +818,14 @@ math::matrix4 rbx::visualengine_t::get_viewmatrix() const
 		return native;
 	}
 
-
-
-
-
-
+	
+	
+	
+	
+	
 	const std::uintptr_t ve = this->address ? this->address : game::visengine.address;
 
-
+	
 	static std::uintptr_t s_last_ve = 0;
 	if (ve != s_last_ve)
 	{
@@ -817,9 +851,9 @@ math::matrix4 rbx::visualengine_t::get_viewmatrix() const
 		}
 	}
 
-
-
-
+	
+	
+	
 	s_native_active.store(false, std::memory_order_relaxed);
 	return native;
 }
@@ -831,9 +865,78 @@ std::uint64_t rbx::current_camera_address()
 		ws = memory->read<std::uint64_t>(game::datamodel.address + Offsets::DataModel::Workspace);
 	if (!ws) return 0;
 
-	std::uint64_t cam = memory->read<std::uint64_t>(ws + Offsets::Workspace::CurrentCamera);
-	if (!cam || cam == ~0ull) return 0;
-	return cam;
+	// A camera pointer is only live for as long as the workspace that owns it,
+	// so one cached address per workspace is enough and the scan below - the
+	// expensive path - runs at most once per place.
+	static std::mutex    s_cam_mtx;
+	static std::uint64_t s_cam      = 0;
+	static std::uint64_t s_cam_ws   = 0;
+	static std::uint64_t s_scan_ms  = 0;
+	static bool          s_warned   = false;
+
+	// The field first: it is the cheap read and it is what the dump names.  A
+	// pointer whose parent is not the workspace is not the camera - it is a
+	// stale value in a field that moved - and is treated as a miss rather than
+	// handed out to a caller that will write a rotation into it.
+	const std::uint64_t field = memory->read<std::uint64_t>(ws + Offsets::Workspace::CurrentCamera);
+	if (field && field != ~0ull &&
+		memory->read<std::uint64_t>(field + Offsets::Instance::Parent) == ws)
+		return field;
+
+	std::lock_guard<std::mutex> lk(s_cam_mtx);
+
+	if (s_cam && s_cam_ws == ws &&
+		memory->read<std::uint64_t>(s_cam + Offsets::Instance::Parent) == ws)
+		return s_cam;
+
+	s_cam = 0;
+
+	const std::uint64_t now = GetTickCount64();
+	if (s_cam_ws == ws && now - s_scan_ms < 1000)
+		return 0;
+
+	s_cam_ws  = ws;
+	s_scan_ms = now;
+
+	// The camera is a child of the workspace called "Camera".  Walking the
+	// children costs a name read each, which is why the answer is cached; the
+	// cap keeps a workspace with a hundred thousand parts from stalling a frame.
+	const std::uint64_t start = memory->read<std::uint64_t>(ws + Offsets::Instance::ChildrenStart);
+	const std::uint64_t end   = memory->read<std::uint64_t>(start + Offsets::Instance::ChildrenEnd);
+
+	std::uint64_t found = 0;
+	std::uint64_t scanned = 0;
+	for (std::uint64_t slot = start; slot != end && scanned < 200000; slot += Offsets::Instance::ChildrenStride, ++scanned)
+	{
+		const std::uint64_t child = memory->read<std::uint64_t>(slot);
+		if (!child || child == ~0ull)
+			continue;
+
+		const std::uint64_t name = memory->read<std::uint64_t>(child + Offsets::Instance::NameContainer);
+		if (!name || name == ~0ull)
+			continue;
+
+		std::string text;
+		try { text = memory->read_string(name); } catch (...) { continue; }
+		if (text != "Camera")
+			continue;
+
+		found = child;
+		break;
+	}
+
+	if (found)
+	{
+		s_cam = found;
+		if (!s_warned)
+		{
+			s_warned = true;
+			debug::warn("camera", "Workspace::CurrentCamera (0x%llx) read empty - using the Camera child at 0x%llx",
+				(unsigned long long)Offsets::Workspace::CurrentCamera, (unsigned long long)found);
+		}
+	}
+
+	return s_cam;
 }
 
 static float s_win_off_x = 0.f;
@@ -844,6 +947,10 @@ void rbx::visualengine_t::update_window_offset()
 	HWND roblox_window = game::wnd;
 	if (!roblox_window) { s_win_off_x = 0.f; s_win_off_y = 0.f; return; }
 
+	// A minimized window answers with the -32000 sentinel. This origin is what
+	// every screen coordinate the overlay draws and aims with is built on, so
+	// keep the last good one rather than flinging the whole overlay off the
+	// desktop for as long as the client stays down.
 	if (IsIconic(roblox_window))
 		return;
 
@@ -869,10 +976,10 @@ bool rbx::visualengine_t::world_to_screen(const math::vector3& world, math::vect
 	clip.x /= clip.w;
 	clip.y /= clip.w;
 
-
-
-
-
+	
+	
+	
+	
 	constexpr float k_ndc_max = 60.f;
 	if (!(clip.x > -k_ndc_max && clip.x < k_ndc_max &&
 	      clip.y > -k_ndc_max && clip.y < k_ndc_max))
@@ -907,10 +1014,10 @@ void rbx::camera_t::set_viewport(const rbx::vector2int16& val)
 
 float rbx::camera_t::get_field_of_view() const
 {
-
-
-
-
+	
+	
+	
+	
 	const float fov = memory->read<float>(this->address + Offsets::Camera::FieldOfView);
 	if (fov > 0.05f && fov < 3.10f) return fov;
 	return 1.22173f;

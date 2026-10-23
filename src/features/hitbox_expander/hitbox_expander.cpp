@@ -77,9 +77,13 @@ void rbx::hitbox_expander::run()
 
 				try {
 					memory->write<math::vector3>(prim_addr + Offsets::Primitive::Size, new_size);
-					std::uint8_t flags = memory->read<std::uint8_t>(prim_addr + Offsets::PrimitiveFlags::CanCollide);
-					flags &= ~0x08;
-					memory->write<std::uint8_t>(prim_addr + Offsets::PrimitiveFlags::CanCollide, flags);
+					// The flags byte is at Primitive::Flags; PrimitiveFlags names the *bits*
+					// inside it.  This used to add the bit to the primitive, i.e. poke
+					// prim+0x8 - Instance::This on every part it touched - instead of
+					// clearing CanCollide in the flags byte.
+					std::uint8_t flags = memory->read<std::uint8_t>(prim_addr + Offsets::Primitive::Flags);
+					flags &= ~static_cast<std::uint8_t>(Offsets::PrimitiveFlags::CanCollide);
+					memory->write<std::uint8_t>(prim_addr + Offsets::Primitive::Flags, flags);
 				} catch (...) { continue; }
 			}
 

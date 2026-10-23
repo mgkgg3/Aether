@@ -476,14 +476,10 @@ namespace uifx
 				const float k = ImClamp((h - 0.30f) / 0.70f, 0.f, 1.f);
 				dl->AddRect(mn, mx, light(0.50f * k * amt), r, 0, 1.f);
 
-				const float halo = 0.13f * k * amt;
-				for (int g = 3; g >= 1; --g)
-				{
-					const float t = (float)g / 3.f;
-					dl->AddRect(ImVec2(mn.x - (float)g, mn.y - (float)g),
-						ImVec2(mx.x + (float)g, mx.y + (float)g),
-						light(halo * (1.f - t) * (1.f - t)), r + (float)g, 0, 1.f);
-				}
+				// No halo.  It was three one pixel rules around the control, and
+				// then a seven step version of the same thing; both read as an
+				// outline drawn twice.  Focus is the one hairline above, and the
+				// hover tint is what says the pointer is there.
 			}
 
 			if (press > 0.02f)
@@ -504,6 +500,14 @@ namespace uifx
 		}
 	}
 
+	// A soft pool of light that follows the pointer inside the plate.
+	//
+	// This used to be a *rim* chase: two 2 px bars (one on each half of
+	// whichever edge was nearest) that ran along the border under the cursor.
+	// On a wide panel that is two white sticks appearing out of nowhere at the
+	// top, bottom or sides - it read as UI debris, not as light.  A light has no
+	// edge, so there is no bar here any more: one radial falloff, drawn as a
+	// triangle fan whose rim is transparent, clipped to the plate.
 	inline void paint_rim(ImDrawList* dl)
 	{
 		if (!on() || !settings::misc_ui::panel_rim || !panel_live() || !dl)
@@ -511,70 +515,51 @@ namespace uifx
 
 		const ImVec2 a = panel_min();
 		const ImVec2 b = panel_max();
-		if (b.x - a.x < 40.f || b.y - a.y < 40.f)
+		if (b.x - a.x < 60.f || b.y - a.y < 60.f)
 			return;
-
-		const ImVec2 p = cursor_pos();
-		const float r = ImMax(2.f, panel_round());
 
 		const float k = amount() * menu_fade();
 		if (k <= 0.004f)
 			return;
-		const float len = 130.f * ImClamp(settings::misc_ui::panel_rim_size, 0.3f, 2.5f);
-		const float guard = r + 2.f;
-		const ImU32 hi = light(0.42f * k);
-		const ImU32 lo = light(0.f);
 
-		const float d_top = fabsf(p.y - a.y);
-		const float d_bot = fabsf(p.y - b.y);
-		const float d_left = fabsf(p.x - a.x);
-		const float d_right = fabsf(p.x - b.x);
-		float best = d_top;
-		int edge = 0;
-		if (d_bot < best) { best = d_bot; edge = 1; }
-		if (d_left < best) { best = d_left; edge = 2; }
-		if (d_right < best) { best = d_right; edge = 3; }
+		const ImVec2 p = cursor_pos();
+		const float inset = 28.f;
+		const ImVec2 c(ImClamp(p.x, a.x + inset, b.x - inset), ImClamp(p.y, a.y + inset, b.y - inset));
 
-		constexpr float kThick = 2.f;
+		const float r = 150.f * ImClamp(settings::misc_ui::panel_rim_size, 0.3f, 2.5f);
+		const ImU32 base = light(1.f) & 0x00FFFFFFu;
 
-		const float xa = ImClamp(p.x - len, a.x + guard, b.x - guard);
-		const float xb = ImClamp(p.x + len, a.x + guard, b.x - guard);
-		const float ya = ImClamp(p.y - len, a.y + guard, b.y - guard);
-		const float yb = ImClamp(p.y + len, a.y + guard, b.y - guard);
-		const float xc = ImClamp(p.x, xa, xb);
-		const float yc = ImClamp(p.y, ya, yb);
+		dl->PushClipRect(ImVec2(a.x + 1.f, a.y + 1.f), ImVec2(b.x - 1.f, b.y - 1.f), true);
 
-		switch (edge)
+		const int seg = 44;
+		dl->PrimReserve(seg * 3 * 3, seg * 3 + 3);
+		const ImDrawIdx base_idx = (ImDrawIdx)dl->_VtxCurrentIdx;
+		const ImVec2 uv = dl->_Data->TexUvWhitePixel;
+		int vtx = 0;
+		for (int layer = 0; layer < 3; ++layer)
 		{
-		case 0:
-			if (xb - xa > 3.f)
+			const float rr = r * (1.f - 0.24f * (float)layer);
+			const int alpha = (int)(5.f * k * (1.f + 0.6f * (float)layer));
+			const ImU32 col = base | ((ImU32)ImClamp(alpha, 0, 255) << IM_COL32_A_SHIFT);
+			const ImU32 rim = base;
+
+			dl->PrimWriteVtx(c, uv, col);
+			for (int i = 0; i < seg; ++i)
 			{
-				dl->AddRectFilledMultiColor(ImVec2(xa, a.y + 1.f), ImVec2(xc, a.y + 1.f + kThick), lo, hi, hi, lo);
-				dl->AddRectFilledMultiColor(ImVec2(xc, a.y + 1.f), ImVec2(xb, a.y + 1.f + kThick), hi, lo, lo, hi);
+				const float ang = (float)i / (float)seg * 6.28318531f;
+				dl->PrimWriteVtx(ImVec2(c.x + cosf(ang) * rr, c.y + sinf(ang) * rr * 0.8f), uv, rim);
 			}
-			break;
-		case 1:
-			if (xb - xa > 3.f)
+			const ImDrawIdx b0 = (ImDrawIdx)(base_idx + vtx);
+			for (int i = 0; i < seg; ++i)
 			{
-				dl->AddRectFilledMultiColor(ImVec2(xa, b.y - 1.f - kThick), ImVec2(xc, b.y - 1.f), lo, hi, hi, lo);
-				dl->AddRectFilledMultiColor(ImVec2(xc, b.y - 1.f - kThick), ImVec2(xb, b.y - 1.f), hi, lo, lo, hi);
+				dl->PrimWriteIdx(b0);
+				dl->PrimWriteIdx((ImDrawIdx)(b0 + 1 + i));
+				dl->PrimWriteIdx((ImDrawIdx)(b0 + 1 + (i + 1) % seg));
 			}
-			break;
-		case 2:
-			if (yb - ya > 3.f)
-			{
-				dl->AddRectFilledMultiColor(ImVec2(a.x + 1.f, ya), ImVec2(a.x + 1.f + kThick, yc), lo, lo, hi, hi);
-				dl->AddRectFilledMultiColor(ImVec2(a.x + 1.f, yc), ImVec2(a.x + 1.f + kThick, yb), hi, hi, lo, lo);
-			}
-			break;
-		default:
-			if (yb - ya > 3.f)
-			{
-				dl->AddRectFilledMultiColor(ImVec2(b.x - 1.f - kThick, ya), ImVec2(b.x - 1.f, yc), lo, lo, hi, hi);
-				dl->AddRectFilledMultiColor(ImVec2(b.x - 1.f - kThick, yc), ImVec2(b.x - 1.f, yb), hi, hi, lo, lo);
-			}
-			break;
+			vtx += seg + 1;
 		}
+
+		dl->PopClipRect();
 	}
 
 	inline void indicator_glow(ImDrawList* dl, float prev_x, float cur_x,

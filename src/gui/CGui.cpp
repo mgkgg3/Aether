@@ -16,6 +16,7 @@
 #include <gui/explorer/AetherExplorer.h>
 #include <gui/menu/SyncBridge.h>
 #include <gui/menu/SyncMenu.h>
+#include <gui/menu/UiSound.h>
 #include <features/misc/UiFx.h>
 #include <features/mesh/MeshChams.h>
 #include <features/mesh/MeshDxShader.h>
@@ -38,6 +39,7 @@ static void apply_theme(int idx);
 #include <features/misc/SkyVideo.h>
 #include <game/game.h>
 #include <render/render.h>
+#include <render/SurfaceTex.h>
 #include <keybind/keybind.h>
 #include <cache/cache.h>
 #include <sdk/sdk.h>
@@ -98,6 +100,8 @@ namespace cfg
 
         write_bool(f,"vis.box",          settings::visuals::box);
         write_int(f,"vis.box_type",      settings::visuals::box_type);
+        write_int(f,"vis.box_style",     settings::visuals::box_style);
+        write_float(f,"vis.box_corner",  settings::visuals::box_corner_scale);
 
         write_int(f,"vis.box_mode",      settings::visuals::box_mode);
         write_col4(f,"vis.box_color",    settings::visuals::box_color);
@@ -132,12 +136,19 @@ namespace cfg
         write_col4(f,"vis.arrows_col",    settings::visuals::arrow_color);
         write_float(f,"vis.arrow_size",   settings::visuals::arrow_size);
         write_float(f,"vis.arrow_radius", settings::visuals::arrow_radius);
+        write_int (f,"vis.arrow_style",   settings::visuals::arrow_style);
+        write_bool(f,"vis.arrow_fov_r",   settings::visuals::arrow_use_fov_radius);
+        write_int (f,"vis.hat_style",     settings::visuals::china_hat_style);
         write_bool(f,"vis.arrow_inf_n",   settings::visuals::arrow_info[0]);
         write_bool(f,"vis.arrow_inf_d",   settings::visuals::arrow_info[1]);
         write_bool(f,"vis.arrow_inf_h",   settings::visuals::arrow_info[2]);
         write_bool(f,"vis.arrow_inf_t",   settings::visuals::arrow_info[3]);
         write_bool(f,"vis.tracer",        settings::visuals::tracer);
         write_int(f,"vis.tracer_origin",  settings::visuals::tracer_origin);
+        write_int (f,"vis.tracer_end",   settings::visuals::tracer_end);
+        write_float(f,"vis.tracer_th",    settings::visuals::tracer_thickness);
+        write_bool(f,"vis.tracer_outline",settings::visuals::tracer_outline);
+        write_int (f,"vis.tracer_style", settings::visuals::tracer_style);
         write_col4(f,"vis.tracer_col",    settings::visuals::tracer_color);
         write_bool(f,"vis.china_hat",     settings::visuals::china_hat);
         write_col4(f,"vis.hat_col",       settings::visuals::china_hat_color);
@@ -191,6 +202,11 @@ namespace cfg
         write_float(f,"vis.hb_width",    settings::visuals::healthbar_width);
         write_float(f,"vis.hb_opacity",  settings::visuals::healthbar_opacity);
         write_bool (f,"vis.hb_glow",     settings::visuals::healthbar_glow);
+        write_int  (f,"vis.hb_style",    settings::visuals::healthbar_style);
+        write_bool (f,"vis.armorbar",    settings::visuals::armorbar);
+        write_col4 (f,"vis.armorbar_col",settings::visuals::armorbar_color);
+        write_bool (f,"vis.nchams_pulse", settings::visuals::nchams_pulse);
+        write_float(f,"vis.nchams_pulse_s", settings::visuals::nchams_pulse_speed);
         write_bool (f,"vis.nchams_glow", settings::visuals::nchams_glow);
         write_float(f,"vis.nchams_glow_o",settings::visuals::nchams_glow_opacity);
         write_float(f,"vis.nchams_glow_s",settings::visuals::nchams_glow_size);
@@ -268,6 +284,21 @@ namespace cfg
         write_float(f,"fx.cross_str_amt",  settings::effects::crosshair_stretch_amount);
         write_float(f,"fx.cross_str_spd",  settings::effects::crosshair_stretch_speed);
 
+        write_bool (f,"fx.tracer",         settings::effects::tracers);
+        write_float(f,"fx.tracer_dur",     settings::effects::tracer_duration);
+        write_float(f,"fx.tracer_thick",   settings::effects::tracer_thickness);
+        write_col4 (f,"fx.tracer_col",     settings::effects::tracer_color);
+        write_bool (f,"fx.tracer_rainbow", settings::effects::tracer_rainbow);
+        write_float(f,"fx.tracer_rspd",    settings::effects::tracer_rainbow_speed);
+        write_bool (f,"fx.tracer_fade",    settings::effects::tracer_fade);
+        write_bool (f,"fx.tracer_outline", settings::effects::tracer_outline);
+        write_float(f,"fx.tracer_glow",    settings::effects::tracer_glow);
+        write_bool (f,"fx.tracer_impact",  settings::effects::tracer_impact);
+        write_float(f,"fx.tracer_imp_sz",  settings::effects::tracer_impact_size);
+        write_bool (f,"fx.tracer_tool",    settings::effects::tracer_from_tool);
+        write_int  (f,"fx.tracer_mode",    settings::effects::tracer_mode);
+        write_float(f,"fx.tracer_len",     settings::effects::tracer_length);
+
         write_bool(f,"hbx.enabled",      settings::hitbox_expander::enabled);
         write_float(f,"hbx.size_x",      settings::hitbox_expander::size_x);
         write_float(f,"hbx.size_y",      settings::hitbox_expander::size_y);
@@ -284,6 +315,8 @@ namespace cfg
         write_bool(f,"tb.continuous",   settings::triggerbot::continuous);
         write_bool(f,"tb.visibility",   settings::triggerbot::visibility_check);
         write_bool(f,"tb.gun_check",    settings::triggerbot::gun_check);
+        write_bool(f,"tb.aim_check",    settings::triggerbot::aim_check);
+        write_bool(f,"tb.skip_firing",  settings::triggerbot::skip_while_firing);
         write_bool(f,"tb.knock_check",   settings::triggerbot::knock_check);
         write_bool(f,"tb.team_check",   settings::triggerbot::team_check);
 
@@ -309,7 +342,6 @@ namespace cfg
         write_float(f,"ab.smooth_x",     settings::aimbot::smoothingx);
         write_float(f,"ab.smooth_y",     settings::aimbot::smoothingy);
         write_int(f,"ab.smooth_style",   settings::aimbot::smoothing_style);
-        write_int(f,"ab.pace_ms",        settings::aimbot::pace_ms);
 
         write_int(f,"ab.priority",       settings::aimbot::priority);
         write_bool(f,"ab.prediction",    settings::aimbot::enable_prediction);
@@ -359,6 +391,7 @@ namespace cfg
         write_col4(f,"vl.aimline_col",  settings::visuals::aim_line_color);
         write_float(f,"vl.aimline_th",  settings::visuals::aim_line_thickness);
         write_bool(f,"vl.aimline_ctr",  settings::visuals::aim_line_centre);
+        write_bool(f,"vl.aimline_sa",   settings::visuals::aim_line_silent);
         write_col4(f,"sa.fov_col",       settings::silentaim::fov_circle_colour);
         write_col4(f,"sa.fov_out_col",   settings::silentaim::fov_outline_colour);
         write_bool(f,"sa.autopred",      settings::silentaim_autopred::enabled);
@@ -371,6 +404,8 @@ namespace cfg
         write_bool(f,"sa.curve_tracer",  settings::silentaim::draw_curve_tracer);
         write_col4(f,"sa.ct_col",        settings::silentaim::curve_tracer_color);
         write_float(f,"sa.ct_thick",     settings::silentaim::curve_tracer_thickness);
+        write_bool (f,"sa.ct_outline",   settings::silentaim::curve_tracer_outline);
+        write_int  (f,"sa.ct_target",    settings::silentaim::curve_tracer_target);
 
         write_bool (f,"op1.enable",      settings::op1::enable);
         write_bool (f,"op1.force",       settings::op1::force);
@@ -525,6 +560,7 @@ namespace cfg
         write_float(f,"ui.th_scale",     sync::state().th_scale);
 
         write_bool(f,"ui.custom_accent", settings::appearance::custom_accent);
+        write_float(f,"ui.accent_spread", settings::appearance::accent_spread);
         write_col4(f,"ui.accent",        settings::appearance::accent);
         write_bool(f,"ui.win_gradient",  settings::appearance::window_gradient);
         write_bool(f,"ui.win_shadow",    settings::appearance::window_shadow);
@@ -533,7 +569,20 @@ namespace cfg
         write_float(f,"ui.rounding",     settings::appearance::rounding);
         write_float(f,"ui.panel_alpha",  settings::appearance::panel_alpha);
         write_float(f,"ui.dock_alpha",   settings::appearance::dock_alpha);
-        write_float(f,"ui.frost",        settings::appearance::glass_frost);
+        write_float(f,"ui.frost",        settings::appearance::glass_sheen);
+        write_bool (f,"ui.opaque",       settings::appearance::no_transparency);
+        write_float(f,"ui.panel_contrast",settings::appearance::panel_contrast);
+        write_bool (f,"ui.aa",           settings::appearance::antialiasing);
+        write_float(f,"ui.aa_q",         settings::appearance::aa_quality);
+        write_bool (f,"bd.on",            settings::backdrop::enabled);
+        // New key: the default moved from 65 to 75, and a key that already
+        // holds 65 in an existing config would keep the old value forever.
+        write_float(f,"bd.blur75",        settings::backdrop::blur);
+        write_float(f,"bd.tint",          settings::backdrop::tint);
+        write_bool (f,"bd.tintonly",      settings::backdrop::tint_only);
+        write_float(f,"bd.pad",           settings::backdrop::capture_pad);
+        write_float(f,"bd.cap",           settings::backdrop::capture_cap);
+        write_bool (f,"bd.status",        settings::backdrop::status_line);
         write_bool(f,"ui.nav_labels",    settings::appearance::nav_labels);
         write_bool(f,"ui.switches",      settings::appearance::switches);
         write_int(f,"ui.set_tab",        settings::appearance::settings_tab);
@@ -553,6 +602,20 @@ namespace cfg
         write_float(f,"ui.bg_glow",      settings::appearance::bg_glow);
         write_bool(f,"ui.bg_parallax",   settings::appearance::bg_parallax);
         write_bool(f,"ui.bg_menu_only",  settings::appearance::bg_menu_only);
+
+        // Which way the falling elements fall, and how they are drawn.  These
+        // were rows in the Config page with no key behind them - a rain angle
+        // chosen in the menu was gone at the next launch.
+        write_int (f,"ui.bg_dir",       settings::appearance::bg_dir);
+        write_float(f,"ui.bg_angle",     settings::appearance::bg_angle);
+        write_float(f,"ui.bg_streak",    settings::appearance::bg_streak);
+        write_float(f,"ui.bg_spread",   settings::appearance::bg_spread);
+        write_float(f,"ui.bg_width",    settings::appearance::bg_width);
+
+        write_bool (f,"ui.enhance",      settings::appearance::enhance);
+        write_float(f,"ui.enhance_size", settings::appearance::enhance_size);
+        write_float(f,"ui.panel_width", settings::appearance::panel_width);
+        write_bool (f,"ui.test_enhance", settings::appearance::test_enhance);
 
 
         write_bool(f,"sky.enabled",      settings::skybox::enabled);
@@ -619,6 +682,10 @@ namespace cfg
         write_col4 (f,"viz.col_raw",     settings::viz::raw_color);
         write_col4 (f,"viz.col_err",     settings::viz::error_color);
 
+        // Everything below used to live only in memory: these features came
+        // back at their defaults on every launch. Kept in one block so the next
+        // feature added has somewhere obvious to be written.
+        // visuals
         write_bool (f,"vis.trail",settings::visuals::trail);
         write_int  (f,"vis.trail_style",settings::visuals::trail_style);
         write_int  (f,"vis.trail_color_mode",settings::visuals::trail_color_mode);
@@ -649,7 +716,9 @@ namespace cfg
         write_float(f,"vis.name_sheen_strength",settings::visuals::name_sheen_strength);
         write_bool (f,"vis.esp_sheen_all",settings::visuals::esp_sheen_all);
         write_float(f,"vis.healthbar_padding",settings::visuals::healthbar_padding);
+        // effects
         write_int  (f,"fx.hitmarker_style",settings::effects::hitmarker_style);
+        write_int  (f,"fx.tracer_style",settings::effects::tracer_style);
         write_bool (f,"fx.hitmarker_shockwave",settings::effects::hitmarker_shockwave);
         write_float(f,"fx.hitmarker_shockwave_size",settings::effects::hitmarker_shockwave_size);
         write_bool (f,"fx.hitmarker_sparks",settings::effects::hitmarker_sparks);
@@ -675,6 +744,7 @@ namespace cfg
         write_float(f,"fx.crosshair_hit_pulse_size",settings::effects::crosshair_hit_pulse_size);
         write_bool (f,"fx.crosshair_dynamic",settings::effects::crosshair_dynamic);
         write_float(f,"fx.crosshair_dynamic_amount",settings::effects::crosshair_dynamic_amount);
+        // sonar
         write_bool (f,"son.enabled",settings::sonar::enabled);
         write_int  (f,"son.keybind",settings::sonar::keybind);
         write_int  (f,"son.activation_mode",settings::sonar::activation_mode);
@@ -713,6 +783,7 @@ namespace cfg
         write_int  (f,"son.color_mode",settings::sonar::color_mode);
         write_float(f,"son.hue_speed",settings::sonar::hue_speed);
         write_bool (f,"son.hide_with_menu",settings::sonar::hide_with_menu);
+        // misc_ui
         write_bool (f,"uifx.enabled",settings::misc_ui::enabled);
         write_float(f,"uifx.intensity",settings::misc_ui::intensity);
         write_bool (f,"uifx.cursor_aura",settings::misc_ui::cursor_aura);
@@ -756,6 +827,9 @@ namespace cfg
         write_bool (f,"uifx.first_pop",settings::misc_ui::first_pop);
         write_bool (f,"uifx.open_flash",settings::misc_ui::open_flash);
         write_float(f,"uifx.open_flash_strength",settings::misc_ui::open_flash_strength);
+        write_bool (f,"uifx.click_sounds",settings::misc_ui::click_sounds);
+        write_float(f,"uifx.click_volume",settings::misc_ui::click_volume);
+        // ui21
         write_bool (f,"ui21.enabled",settings::ui21::enabled);
         write_bool (f,"ui21.glass_layers",settings::ui21::glass_layers);
         write_float(f,"ui21.glass_depth",settings::ui21::glass_depth);
@@ -768,35 +842,125 @@ namespace cfg
         write_col4(f,"ui21.accent_2",settings::ui21::accent_2);
         write_bool (f,"ui21.noise",settings::ui21::noise);
         write_float(f,"ui21.noise_amount",settings::ui21::noise_amount);
+        write_bool (f,"ui21.light_rays",settings::ui21::light_rays);
+        write_float(f,"ui21.light_strength",settings::ui21::light_rays_strength);
+        write_float(f,"ui21.light_spread",settings::ui21::light_rays_spread);
+        write_bool (f,"ui21.aurora",settings::ui21::aurora);
+        write_float(f,"ui21.aurora_strength",settings::ui21::aurora_strength);
+        write_bool (f,"ui21.panel_glow",settings::ui21::panel_glow);
+        write_bool (f,"ui21.card_glow",settings::ui21::card_glow);
+        write_float(f,"ui21.card_glow_strength",settings::ui21::card_glow_strength);
+        write_bool (f,"ui21.panel_shadow",settings::ui21::panel_shadow);
+        write_float(f,"ui21.panel_shadow_strength",settings::ui21::panel_shadow_strength);
+        write_bool (f,"ui21.top_sheen",settings::ui21::top_sheen);
+        write_float(f,"ui21.top_sheen_speed",settings::ui21::top_sheen_speed);
+        // home
         write_bool (f,"home.card_icons",settings::home::card_icons);
+        // docks
         write_bool (f,"dk.behind_menu",settings::docks::behind_menu);
+        // viz
         write_float(f,"viz.scale",settings::viz::scale);
+        // aimbot
         write_bool (f,"ab.fov_fill",settings::aimbot::fov_fill);
         write_col4(f,"ab.fov_fill_colour",settings::aimbot::fov_fill_colour);
         write_float(f,"ab.fov_fill_opacity",settings::aimbot::fov_fill_opacity);
+        write_float(f,"ab.fov_th",settings::aimbot::fov_thickness);
+        write_bool (f,"ab.fov_outline",settings::aimbot::fov_outline);
+        write_float(f,"ab.tr_th",settings::aimbot::tracer_thickness);
+        write_bool (f,"ab.tr_outline",settings::aimbot::tracer_outline);
+        write_int (f,"ab.tr_style",settings::aimbot::tracer_style);
+        write_int (f,"ab.fov_style",settings::aimbot::fov_style);
+        // silentaim
         write_bool (f,"sa.fov_fill",settings::silentaim::fov_fill);
         write_col4(f,"sa.fov_fill_colour",settings::silentaim::fov_fill_colour);
         write_float(f,"sa.fov_fill_opacity",settings::silentaim::fov_fill_opacity);
+        write_float(f,"sa.fov_th",settings::silentaim::fov_thickness);
+        write_bool (f,"sa.fov_outline",settings::silentaim::fov_outline);
+        write_int  (f,"sa.fov_style",settings::silentaim::fov_style);
         write_bool (f,"sa.spoof_mouse",settings::silentaim::spoof_mouse);
         write_bool (f,"sa.guncheck",settings::silentaim::guncheck);
         write_int  (f,"sa.priorities",settings::silentaim::priorities);
+        // triggerbot
         write_col4(f,"tb.fov_circle_colour",settings::triggerbot::fov_circle_colour);
         write_col4(f,"tb.fov_outline_colour",settings::triggerbot::fov_outline_colour);
+        write_float(f,"tb.fov_th",settings::triggerbot::fov_thickness);
+        write_bool (f,"tb.fov_outline",settings::triggerbot::fov_outline);
+        write_int  (f,"tb.fov_style",settings::triggerbot::fov_style);
+        write_int  (f,"vis.skeleton_style",settings::visuals::skeleton_style);
+        write_bool (f,"vis.skel_joints", settings::visuals::skeleton_joints);
+        write_float(f,"vis.skel_joint_size", settings::visuals::skeleton_joint_size);
+        write_int  (f,"vis.skel_segs",   settings::visuals::skeleton_vis_segments);
+        write_col4 (f,"vis.skel_hidden", settings::visuals::skeleton_hidden_color);
+        write_int  (f,"vis.radar_style",settings::visuals::radar_style);
         write_bool (f,"tb.fov_fill",settings::triggerbot::fov_fill);
         write_col4(f,"tb.fov_fill_colour",settings::triggerbot::fov_fill_colour);
         write_float(f,"tb.fov_fill_opacity",settings::triggerbot::fov_fill_opacity);
         write_bool (f,"tb.dead_check",settings::triggerbot::dead_check);
+        // walkspeed
         write_bool (f,"ws.enabled",settings::walkspeed::enabled);
         write_float(f,"ws.speed",settings::walkspeed::speed);
         write_int  (f,"ws.keybind",settings::walkspeed::keybind);
         write_int  (f,"ws.keybind_mode",settings::walkspeed::keybind_mode);
+        // streamproof
         write_bool (f,"spf.enabled",settings::streamproof::enabled);
+        // skybox
         write_str (f,"sky.video_file",settings::skybox::video_file);
+        write_bool (f,"sky.pre_on",   settings::skybox::preset_on);
+        write_int  (f,"sky.pre",      settings::skybox::preset);
+        write_bool (f,"sky.pre_faces",settings::skybox::preset_faces);
+        write_bool (f,"sky.pre_sm",   settings::skybox::preset_sun_moon);
+        write_bool (f,"sky.pre_stars",settings::skybox::preset_stars);
+        write_bool (f,"sky.stars",    settings::skybox::stars_on);
+        write_int  (f,"sky.starc",    settings::skybox::stars_count);
+        write_bool (f,"sky.pre_cel",  settings::skybox::hide_celestial);
+        write_bool (f,"sky.pre_ori",  settings::skybox::orientation_on);
+        write_col3 (f,"sky.pre_oriv", settings::skybox::orientation);
+        // exploits
         write_bool (f,"exp.low_gravity",settings::exploits::low_gravity);
         write_float(f,"exp.gravity_value",settings::exploits::gravity_value);
         write_bool (f,"exp.tp_cursor",settings::exploits::tp_cursor);
         write_int  (f,"exp.tp_cursor_key",settings::exploits::tp_cursor_key);
         write_float(f,"exp.tp_cursor_dist",settings::exploits::tp_cursor_dist);
+        // source pack
+        write_bool (f,"fu.antifling",settings::fusion::antifling);
+        write_float(f,"fu.fling_lin",settings::fusion::antifling_lin);
+        write_float(f,"fu.fling_ang",settings::fusion::antifling_ang);
+        write_bool (f,"fu.jumppower",settings::fusion::jumppower);
+        write_int  (f,"fu.jump_key",settings::fusion::jumppower_key);
+        write_int  (f,"fu.jump_mode",settings::fusion::jumppower_mode);
+        write_float(f,"fu.jump_value",settings::fusion::jumppower_value);
+        write_bool (f,"fu.hipheight",settings::fusion::hipheight);
+        write_float(f,"fu.hip_value",settings::fusion::hipheight_value);
+        write_bool (f,"fu.freecam",settings::fusion::freecam);
+        write_int  (f,"fu.free_key",settings::fusion::freecam_key);
+        write_int  (f,"fu.free_mode",settings::fusion::freecam_mode);
+        write_float(f,"fu.free_speed",settings::fusion::freecam_speed);
+        write_float(f,"fu.free_sprint",settings::fusion::freecam_sprint);
+        write_bool (f,"fu.free_revert",settings::fusion::freecam_revert);
+        write_bool (f,"fu.orbit",settings::fusion::orbit);
+        write_int  (f,"fu.orbit_key",settings::fusion::orbit_key);
+        write_int  (f,"fu.orbit_act",settings::fusion::orbit_activation);
+        write_int  (f,"fu.orbit_target",settings::fusion::orbit_target);
+        write_float(f,"fu.orbit_radius",settings::fusion::orbit_radius);
+        write_float(f,"fu.orbit_speed",settings::fusion::orbit_speed);
+        write_float(f,"fu.orbit_height",settings::fusion::orbit_height);
+        write_bool (f,"fu.orbit_spec",settings::fusion::orbit_spectate);
+        write_bool (f,"fu.headless",settings::fusion::headless);
+        write_bool (f,"fu.korblox",settings::fusion::korblox);
+        write_bool (f,"fu.spectate",settings::fusion::spectate);
+        write_int  (f,"fu.spec_key",settings::fusion::spectate_cycle_key);
+        write_bool (f,"fu.flyabove",settings::fusion::flyabove);
+        write_float(f,"fu.flyabove_h",settings::fusion::flyabove_height);
+        write_bool (f,"fu.hitnotes",settings::fusion::hit_notifications);
+        write_float(f,"fu.hitnotes_s",settings::fusion::hit_notification_seconds);
+        write_bool (f,"fu.fps",settings::fusion::show_fps);
+        // source pack
+        write_bool (f,"fu.norecoil",settings::fusion::norecoil);
+        write_int  (f,"fu.nr_key",settings::fusion::norecoil_key);
+        write_float(f,"fu.nr_x",settings::fusion::norecoil_x);
+        write_float(f,"fu.nr_y",settings::fusion::norecoil_y);
+        write_float(f,"fu.nr_strength",settings::fusion::norecoil_strength);
+        // theme
         write_col4(f,"theme.accent",settings::theme::accent);
         write_col4(f,"theme.bg_one",settings::theme::bg_one);
         write_col4(f,"theme.bg_two",settings::theme::bg_two);
@@ -804,9 +968,11 @@ namespace cfg
         write_col4(f,"theme.outline",settings::theme::outline);
         write_col4(f,"theme.text_active",settings::theme::text_active);
         write_col4(f,"theme.text_inactive",settings::theme::text_inactive);
+        // menu
         write_bool (f,"ui.vsync",settings::menu::vsync);
         write_bool (f,"ui.performance_mode",settings::menu::performance_mode);
         write_int  (f,"ui.fps_limit",settings::menu::fps_limit);
+        // settings
         write_bool (f,"app.hide_console",settings::settings::hide_console);
     }
 
@@ -843,6 +1009,8 @@ namespace cfg
 
             if      (key=="vis.box")           settings::visuals::box=bv;
             else if (key=="vis.box_type")      settings::visuals::box_type=ival;
+            else if (key=="vis.box_style")     settings::visuals::box_style=ival;
+            else if (key=="vis.box_corner")    settings::visuals::box_corner_scale=fval;
             else if (key=="vis.box_mode")      settings::visuals::box_mode=ival;
             else if (key=="vis.box_color")     parse_c4(settings::visuals::box_color);
             else if (key=="vis.box_fill")      settings::visuals::box_fill=bv;
@@ -882,6 +1050,19 @@ namespace cfg
             else if (key=="vis.arrow_inf_t")   settings::visuals::arrow_info[3]=bv;
             else if (key=="vis.tracer")        settings::visuals::tracer=bv;
             else if (key=="vis.tracer_origin") settings::visuals::tracer_origin=ival;
+            else if (key=="vis.tracer_end")    settings::visuals::tracer_end=ival;
+            else if (key=="vis.tracer_th")     settings::visuals::tracer_thickness=fval;
+            else if (key=="vis.tracer_outline")settings::visuals::tracer_outline=bv;
+            else if (key=="vis.tracer_style")  settings::visuals::tracer_style=ival;
+            else if (key=="vis.arrow_style")   settings::visuals::arrow_style=ival;
+            else if (key=="vis.arrow_fov_r")   settings::visuals::arrow_use_fov_radius=bv;
+            else if (key=="vis.hat_style")     settings::visuals::china_hat_style=ival;
+            else if (key=="vis.skeleton_style")settings::visuals::skeleton_style=ival;
+            else if (key=="vis.skel_joints")   settings::visuals::skeleton_joints=bv;
+            else if (key=="vis.skel_joint_size")settings::visuals::skeleton_joint_size=fval;
+            else if (key=="vis.skel_segs")     settings::visuals::skeleton_vis_segments=ival;
+            else if (key=="vis.skel_hidden")   parse_c4(settings::visuals::skeleton_hidden_color);
+            else if (key=="vis.radar_style")   settings::visuals::radar_style=ival;
             else if (key=="vis.tracer_col")    parse_c4(settings::visuals::tracer_color);
             else if (key=="vis.china_hat")     settings::visuals::china_hat=bv;
             else if (key=="vis.hat_col")       parse_c4(settings::visuals::china_hat_color);
@@ -980,6 +1161,8 @@ namespace cfg
             else if (key=="tb.continuous")     settings::triggerbot::continuous=bv;
             else if (key=="tb.visibility")     settings::triggerbot::visibility_check=bv;
             else if (key=="tb.gun_check")      settings::triggerbot::gun_check=bv;
+            else if (key=="tb.aim_check")      settings::triggerbot::aim_check=bv;
+            else if (key=="tb.skip_firing")    settings::triggerbot::skip_while_firing=bv;
 
             else if (key=="sp360.enabled")     settings::spin360::enabled=bv;
             else if (key=="sp360.keybind")     settings::spin360::keybind=ival;
@@ -992,6 +1175,9 @@ namespace cfg
             else if (key=="vis.hb_width")      settings::visuals::healthbar_width=fval;
             else if (key=="vis.hb_opacity")    settings::visuals::healthbar_opacity=fval;
             else if (key=="vis.hb_glow")       settings::visuals::healthbar_glow=bv;
+            else if (key=="vis.hb_style")      settings::visuals::healthbar_style=ival;
+            else if (key=="vis.armorbar")      settings::visuals::armorbar=bv;
+            else if (key=="vis.armorbar_col")  parse_c4(settings::visuals::armorbar_color);
             else if (key=="vis.nchams_glow")   settings::visuals::nchams_glow=bv;
             else if (key=="vis.nchams_glow_o") settings::visuals::nchams_glow_opacity=fval;
             else if (key=="vis.nchams_glow_s") settings::visuals::nchams_glow_size=fval;
@@ -1039,6 +1225,20 @@ namespace cfg
             else if (key=="fx.cross_str")      settings::effects::crosshair_stretch=bv;
             else if (key=="fx.cross_str_amt")  settings::effects::crosshair_stretch_amount=fval;
             else if (key=="fx.cross_str_spd")  settings::effects::crosshair_stretch_speed=fval;
+            else if (key=="fx.tracer")         settings::effects::tracers=bv;
+            else if (key=="fx.tracer_fade")    settings::effects::tracer_fade=bv;
+            else if (key=="fx.tracer_outline") settings::effects::tracer_outline=bv;
+            else if (key=="fx.tracer_impact")  settings::effects::tracer_impact=bv;
+            else if (key=="fx.tracer_tool")    settings::effects::tracer_from_tool=bv;
+            else if (key=="fx.tracer_mode")    settings::effects::tracer_mode=ival;
+            else if (key=="fx.tracer_len")     settings::effects::tracer_length=fval;
+            else if (key=="fx.tracer_rainbow") settings::effects::tracer_rainbow=bv;
+            else if (key=="fx.tracer_dur")     settings::effects::tracer_duration=fval;
+            else if (key=="fx.tracer_thick")   settings::effects::tracer_thickness=fval;
+            else if (key=="fx.tracer_rspd")    settings::effects::tracer_rainbow_speed=fval;
+            else if (key=="fx.tracer_glow")    settings::effects::tracer_glow=fval;
+            else if (key=="fx.tracer_imp_sz")  settings::effects::tracer_impact_size=fval;
+            else if (key=="fx.tracer_col")     parse_c4(settings::effects::tracer_color);
             } catch(...) {}
 
             try {
@@ -1060,7 +1260,6 @@ namespace cfg
             else if (key=="ab.smooth_x")     settings::aimbot::smoothingx=fval;
             else if (key=="ab.smooth_y")     settings::aimbot::smoothingy=fval;
             else if (key=="ab.smooth_style") settings::aimbot::smoothing_style=ival;
-            else if (key=="ab.pace_ms")      settings::aimbot::pace_ms=ival;
             else if (key=="ab.priority")     settings::aimbot::priority=ival;
             else if (key=="ab.prediction")   settings::aimbot::enable_prediction=bv;
             else if (key=="ab.pred_x")       settings::aimbot::prediction_x=fval;
@@ -1078,6 +1277,51 @@ namespace cfg
             else if (key=="ab.tracer")        settings::aimbot::tracer=bv;
             else if (key=="ab.tracer_origin") settings::aimbot::tracer_origin=ival;
             else if (key=="ab.tracer_col")    parse_c4(settings::aimbot::tracer_color);
+            else if (key=="ab.tr_th")         settings::aimbot::tracer_thickness=fval;
+            else if (key=="ab.tr_outline")    settings::aimbot::tracer_outline=bv;
+            else if (key=="ab.tr_style")      settings::aimbot::tracer_style=ival;
+            else if (key=="ab.fov_style")     settings::aimbot::fov_style=ival;
+            else if (key=="sa.fov_style")     settings::silentaim::fov_style=ival;
+            else if (key=="tb.fov_style")     settings::triggerbot::fov_style=ival;
+            else if (key=="fu.antifling")     settings::fusion::antifling=bv;
+            else if (key=="fu.fling_lin")     settings::fusion::antifling_lin=fval;
+            else if (key=="fu.fling_ang")     settings::fusion::antifling_ang=fval;
+            else if (key=="fu.jumppower")     settings::fusion::jumppower=bv;
+            else if (key=="fu.jump_key")      settings::fusion::jumppower_key=ival;
+            else if (key=="fu.jump_mode")     settings::fusion::jumppower_mode=ival;
+            else if (key=="fu.jump_value")    settings::fusion::jumppower_value=fval;
+            else if (key=="fu.hipheight")     settings::fusion::hipheight=bv;
+            else if (key=="fu.hip_value")     settings::fusion::hipheight_value=fval;
+            else if (key=="fu.freecam")       settings::fusion::freecam=bv;
+            else if (key=="fu.free_key")      settings::fusion::freecam_key=ival;
+            else if (key=="fu.free_mode")     settings::fusion::freecam_mode=ival;
+            else if (key=="fu.free_speed")    settings::fusion::freecam_speed=fval;
+            else if (key=="fu.free_sprint")   settings::fusion::freecam_sprint=fval;
+            else if (key=="fu.free_revert")   settings::fusion::freecam_revert=bv;
+            else if (key=="fu.orbit")         settings::fusion::orbit=bv;
+            else if (key=="fu.orbit_key")     settings::fusion::orbit_key=ival;
+            else if (key=="fu.orbit_act")     settings::fusion::orbit_activation=ival;
+            else if (key=="fu.orbit_target")  settings::fusion::orbit_target=ival;
+            else if (key=="fu.orbit_radius")  settings::fusion::orbit_radius=fval;
+            else if (key=="fu.orbit_speed")   settings::fusion::orbit_speed=fval;
+            else if (key=="fu.orbit_height")  settings::fusion::orbit_height=fval;
+            else if (key=="fu.orbit_spec")    settings::fusion::orbit_spectate=bv;
+            else if (key=="fu.headless")      settings::fusion::headless=bv;
+            else if (key=="fu.korblox")       settings::fusion::korblox=bv;
+            else if (key=="fu.spectate")      settings::fusion::spectate=bv;
+            else if (key=="fu.spec_key")      settings::fusion::spectate_cycle_key=ival;
+            else if (key=="fu.flyabove")      settings::fusion::flyabove=bv;
+            else if (key=="fu.flyabove_h")    settings::fusion::flyabove_height=fval;
+            else if (key=="fu.hitnotes")      settings::fusion::hit_notifications=bv;
+            else if (key=="fu.hitnotes_s")    settings::fusion::hit_notification_seconds=fval;
+            else if (key=="fu.fps")           settings::fusion::show_fps=bv;
+            else if (key=="fu.norecoil")      settings::fusion::norecoil=bv;
+            else if (key=="fu.nr_key")        settings::fusion::norecoil_key=ival;
+            else if (key=="fu.nr_x")          settings::fusion::norecoil_x=fval;
+            else if (key=="fu.nr_y")          settings::fusion::norecoil_y=fval;
+            else if (key=="fu.nr_strength")   settings::fusion::norecoil_strength=fval;
+            else if (key=="ab.fov_th")        settings::aimbot::fov_thickness=fval;
+            else if (key=="ab.fov_outline")   settings::aimbot::fov_outline=bv;
             else if (key=="ab.offset")       settings::aimbot::offset_enabled=bv;
             else if (key=="ab.offset_x")     settings::aimbot::offset_x=fval;
             else if (key=="ab.offset_y")     settings::aimbot::offset_y=fval;
@@ -1112,8 +1356,11 @@ namespace cfg
             else if (key=="vl.aimline_col")   parse_c4(settings::visuals::aim_line_color);
             else if (key=="vl.aimline_th")    settings::visuals::aim_line_thickness=fval;
             else if (key=="vl.aimline_ctr")   settings::visuals::aim_line_centre=bv;
+            else if (key=="vl.aimline_sa")    settings::visuals::aim_line_silent=bv;
             else if (key=="sa.fov_col")       parse_c4(settings::silentaim::fov_circle_colour);
             else if (key=="sa.fov_out_col")   parse_c4(settings::silentaim::fov_outline_colour);
+            else if (key=="sa.fov_th")        settings::silentaim::fov_thickness=fval;
+            else if (key=="sa.fov_outline")   settings::silentaim::fov_outline=bv;
             else if (key=="sa.autopred")      settings::silentaim_autopred::enabled=bv;
             else if (key=="sa.autopred_str")  settings::silentaim_autopred::strength=fval;
             else if (key=="sa.mouse_spoof")   settings::mouse_spoof::enabled=bv;
@@ -1132,6 +1379,8 @@ namespace cfg
             else if (key=="op1.no_smooth")     settings::op1::no_smoothing=bv;
             else if (key=="op1.sticky_ms")     settings::op1::sticky_ms=ival;
             else if (key=="sa.ct_col")         parse_c4(settings::silentaim::curve_tracer_color);
+            else if (key=="sa.ct_outline")     settings::silentaim::curve_tracer_outline=bv;
+            else if (key=="sa.ct_target")      settings::silentaim::curve_tracer_target=ival;
             else if (key=="sa.ct_thick")       settings::silentaim::curve_tracer_thickness=fval;
             } catch(...) {}
 
@@ -1148,12 +1397,16 @@ namespace cfg
             else if (key=="tb.delay_ms")      settings::triggerbot::delay_ms=fval;
             else if (key=="tb.fov")           settings::triggerbot::fov=fval;
             else if (key=="tb.draw_fov")      settings::triggerbot::draw_fov=bv;
+            else if (key=="tb.fov_th")        settings::triggerbot::fov_thickness=fval;
+            else if (key=="tb.fov_outline")   settings::triggerbot::fov_outline=bv;
             else if (key=="tb.knock_check")   settings::triggerbot::knock_check=bv;
             else if (key=="tb.team_check")    settings::triggerbot::team_check=bv;
             else if (key=="tb.target_part")   settings::triggerbot::target_part=ival;
             else if (key=="tb.continuous")    settings::triggerbot::continuous=bv;
             else if (key=="tb.visibility")    settings::triggerbot::visibility_check=bv;
             else if (key=="tb.gun_check")     settings::triggerbot::gun_check=bv;
+            else if (key=="tb.aim_check")     settings::triggerbot::aim_check=bv;
+            else if (key=="tb.skip_firing")   settings::triggerbot::skip_while_firing=bv;
             else if (key=="sp360.enabled")    settings::spin360::enabled=bv;
             else if (key=="sp360.keybind")    settings::spin360::keybind=ival;
             else if (key=="sp360.actmode")    settings::spin360::activation_mode=ival;
@@ -1290,6 +1543,7 @@ namespace cfg
             else if (key=="ui.th_scale")       sync::state().th_scale=fval;
 
             else if (key=="ui.custom_accent")  settings::appearance::custom_accent=bv;
+            else if (key=="ui.accent_spread")  settings::appearance::accent_spread=fval;
             else if (key=="ui.accent")         parse_c4(settings::appearance::accent);
             else if (key=="ui.win_gradient")   settings::appearance::window_gradient=bv;
             else if (key=="ui.win_shadow")     settings::appearance::window_shadow=bv;
@@ -1298,7 +1552,18 @@ namespace cfg
             else if (key=="ui.rounding")       settings::appearance::rounding=fval;
             else if (key=="ui.panel_alpha")    settings::appearance::panel_alpha=fval;
             else if (key=="ui.dock_alpha")     settings::appearance::dock_alpha=fval;
-            else if (key=="ui.frost")          settings::appearance::glass_frost=fval;
+            else if (key=="ui.frost")          settings::appearance::glass_sheen=fval;
+            else if (key=="ui.opaque")         settings::appearance::no_transparency=bv;
+            else if (key=="ui.panel_contrast")  settings::appearance::panel_contrast=fval;
+            else if (key=="ui.aa")             settings::appearance::antialiasing=bv;
+            else if (key=="ui.aa_q")           settings::appearance::aa_quality=fval;
+            else if (key=="bd.on")             settings::backdrop::enabled=bv;
+            else if (key=="bd.blur75")         settings::backdrop::blur=fval;
+            else if (key=="bd.tint")           settings::backdrop::tint=fval;
+            else if (key=="bd.tintonly")       settings::backdrop::tint_only=bv;
+            else if (key=="bd.pad")            settings::backdrop::capture_pad=fval;
+            else if (key=="bd.cap")            settings::backdrop::capture_cap=fval;
+            else if (key=="bd.status")         settings::backdrop::status_line=bv;
             else if (key=="ui.nav_labels")    settings::appearance::nav_labels=bv;
             else if (key=="ui.switches")       settings::appearance::switches=bv;
             else if (key=="ui.set_tab")        settings::appearance::settings_tab=ival;
@@ -1319,6 +1584,15 @@ namespace cfg
             else if (key=="ui.bg_glow")        settings::appearance::bg_glow=fval;
             else if (key=="ui.bg_parallax")    settings::appearance::bg_parallax=bv;
             else if (key=="ui.bg_menu_only")   settings::appearance::bg_menu_only=bv;
+            else if (key=="ui.bg_dir")         settings::appearance::bg_dir=ival;
+            else if (key=="ui.bg_angle")       settings::appearance::bg_angle=fval;
+            else if (key=="ui.bg_streak")      settings::appearance::bg_streak=fval;
+            else if (key=="ui.bg_spread")      settings::appearance::bg_spread=fval;
+            else if (key=="ui.bg_width")       settings::appearance::bg_width=fval;
+            else if (key=="ui.enhance")        settings::appearance::enhance=bv;
+            else if (key=="ui.enhance_size")   settings::appearance::enhance_size=fval;
+            else if (key=="ui.panel_width")    settings::appearance::panel_width=fval;
+            else if (key=="ui.test_enhance")   settings::appearance::test_enhance=bv;
 
 
             else if (key=="sky.enabled")       settings::skybox::enabled=bv;
@@ -1332,6 +1606,8 @@ namespace cfg
             else if (key=="vis.nchams_out")    parse_c4(settings::visuals::nchams_outline_color);
             else if (key=="vis.nchams_fcol")   parse_c4(settings::visuals::nchams_fill_color);
             else if (key=="vis.nchams_style")  settings::visuals::nchams_shader_style=ival;
+            else if (key=="vis.nchams_pulse")  settings::visuals::nchams_pulse=bv;
+            else if (key=="vis.nchams_pulse_s")settings::visuals::nchams_pulse_speed=fval;
             else if (key=="vis.nchams_box")  { settings::visuals::nchams=bv; settings::visuals::nchams_mode=0; }
             else if (key=="vis.nchams_box_col")   parse_c4(settings::visuals::nchams_outline_color);
             else if (key=="vis.nchams_fill") { settings::visuals::nchams=bv; settings::visuals::nchams_mode=1; }
@@ -1429,6 +1705,7 @@ namespace cfg
             }
             } catch(...) {}
 
+            // visuals
             try {
             if      (key=="vis.trail") settings::visuals::trail=bv;
             else if (key=="vis.trail_style") settings::visuals::trail_style=ival;
@@ -1462,8 +1739,10 @@ namespace cfg
             else if (key=="vis.healthbar_padding") settings::visuals::healthbar_padding=fval;
             } catch(...) {}
 
+            // effects
             try {
             if      (key=="fx.hitmarker_style") settings::effects::hitmarker_style=ival;
+            if      (key=="fx.tracer_style")     settings::effects::tracer_style=ival;
             else if (key=="fx.hitmarker_shockwave") settings::effects::hitmarker_shockwave=bv;
             else if (key=="fx.hitmarker_shockwave_size") settings::effects::hitmarker_shockwave_size=fval;
             else if (key=="fx.hitmarker_sparks") settings::effects::hitmarker_sparks=bv;
@@ -1491,6 +1770,7 @@ namespace cfg
             else if (key=="fx.crosshair_dynamic_amount") settings::effects::crosshair_dynamic_amount=fval;
             } catch(...) {}
 
+            // sonar
             try {
             if      (key=="son.enabled") settings::sonar::enabled=bv;
             else if (key=="son.keybind") settings::sonar::keybind=ival;
@@ -1532,6 +1812,7 @@ namespace cfg
             else if (key=="son.hide_with_menu") settings::sonar::hide_with_menu=bv;
             } catch(...) {}
 
+            // misc_ui
             try {
             if      (key=="uifx.enabled") settings::misc_ui::enabled=bv;
             else if (key=="uifx.intensity") settings::misc_ui::intensity=fval;
@@ -1576,8 +1857,11 @@ namespace cfg
             else if (key=="uifx.first_pop") settings::misc_ui::first_pop=bv;
             else if (key=="uifx.open_flash") settings::misc_ui::open_flash=bv;
             else if (key=="uifx.open_flash_strength") settings::misc_ui::open_flash_strength=fval;
+            else if (key=="uifx.click_sounds") settings::misc_ui::click_sounds=bv;
+            else if (key=="uifx.click_volume") settings::misc_ui::click_volume=fval;
             } catch(...) {}
 
+            // ui21
             try {
             if      (key=="ui21.enabled") settings::ui21::enabled=bv;
             else if (key=="ui21.glass_layers") settings::ui21::glass_layers=bv;
@@ -1591,26 +1875,43 @@ namespace cfg
             else if (key=="ui21.accent_2") parse_c4(settings::ui21::accent_2);
             else if (key=="ui21.noise") settings::ui21::noise=bv;
             else if (key=="ui21.noise_amount") settings::ui21::noise_amount=fval;
+            else if (key=="ui21.light_rays") settings::ui21::light_rays=bv;
+            else if (key=="ui21.light_strength") settings::ui21::light_rays_strength=fval;
+            else if (key=="ui21.light_spread") settings::ui21::light_rays_spread=fval;
+            else if (key=="ui21.aurora") settings::ui21::aurora=bv;
+            else if (key=="ui21.aurora_strength") settings::ui21::aurora_strength=fval;
+            else if (key=="ui21.panel_glow") settings::ui21::panel_glow=bv;
+            else if (key=="ui21.card_glow") settings::ui21::card_glow=bv;
+            else if (key=="ui21.card_glow_strength") settings::ui21::card_glow_strength=fval;
+            else if (key=="ui21.panel_shadow") settings::ui21::panel_shadow=bv;
+            else if (key=="ui21.panel_shadow_strength") settings::ui21::panel_shadow_strength=fval;
+            else if (key=="ui21.top_sheen") settings::ui21::top_sheen=bv;
+            else if (key=="ui21.top_sheen_speed") settings::ui21::top_sheen_speed=fval;
             } catch(...) {}
 
+            // home
             try {
             if      (key=="home.card_icons") settings::home::card_icons=bv;
             } catch(...) {}
 
+            // docks
             try {
             if      (key=="dk.behind_menu") settings::docks::behind_menu=bv;
             } catch(...) {}
 
+            // viz
             try {
             if      (key=="viz.scale") settings::viz::scale=fval;
             } catch(...) {}
 
+            // aimbot
             try {
             if      (key=="ab.fov_fill") settings::aimbot::fov_fill=bv;
             else if (key=="ab.fov_fill_colour") parse_c4(settings::aimbot::fov_fill_colour);
             else if (key=="ab.fov_fill_opacity") settings::aimbot::fov_fill_opacity=fval;
             } catch(...) {}
 
+            // silentaim
             try {
             if      (key=="sa.fov_fill") settings::silentaim::fov_fill=bv;
             else if (key=="sa.fov_fill_colour") parse_c4(settings::silentaim::fov_fill_colour);
@@ -1620,6 +1921,7 @@ namespace cfg
             else if (key=="sa.priorities") settings::silentaim::priorities=ival;
             } catch(...) {}
 
+            // triggerbot
             try {
             if      (key=="tb.fov_circle_colour") parse_c4(settings::triggerbot::fov_circle_colour);
             else if (key=="tb.fov_outline_colour") parse_c4(settings::triggerbot::fov_outline_colour);
@@ -1629,6 +1931,7 @@ namespace cfg
             else if (key=="tb.dead_check") settings::triggerbot::dead_check=bv;
             } catch(...) {}
 
+            // walkspeed
             try {
             if      (key=="ws.enabled") settings::walkspeed::enabled=bv;
             else if (key=="ws.speed") settings::walkspeed::speed=fval;
@@ -1636,14 +1939,36 @@ namespace cfg
             else if (key=="ws.keybind_mode") settings::walkspeed::keybind_mode=ival;
             } catch(...) {}
 
+            // streamproof
             try {
             if      (key=="spf.enabled") settings::streamproof::enabled=bv;
             } catch(...) {}
 
+            // skybox
             try {
             if      (key=="sky.video_file") snprintf(settings::skybox::video_file, sizeof settings::skybox::video_file, "%s", val.c_str());
             } catch(...) {}
 
+            // skybox presets
+            //
+            // Flat statements instead of eight more branches of the if/else
+            // chain above: MSVC counts an if/else chain against its nesting
+            // limit, this file is already at it, and more levels of it are what
+            // C1061 was complaining about.
+            try {
+            if (key=="sky.pre_on")    settings::skybox::preset_on=bv;
+            if (key=="sky.pre")       settings::skybox::preset=ival;
+            if (key=="sky.pre_faces") settings::skybox::preset_faces=bv;
+            if (key=="sky.pre_sm")    settings::skybox::preset_sun_moon=bv;
+            if (key=="sky.pre_stars") settings::skybox::preset_stars=bv;
+            if (key=="sky.stars")     settings::skybox::stars_on=bv;
+            if (key=="sky.starc")     settings::skybox::stars_count=ival;
+            if (key=="sky.pre_cel")   settings::skybox::hide_celestial=bv;
+            if (key=="sky.pre_ori")   settings::skybox::orientation_on=bv;
+            if (key=="sky.pre_oriv")  parse_c3(settings::skybox::orientation);
+            } catch(...) {}
+
+            // exploits
             try {
             if      (key=="exp.low_gravity") settings::exploits::low_gravity=bv;
             else if (key=="exp.gravity_value") settings::exploits::gravity_value=fval;
@@ -1652,6 +1977,7 @@ namespace cfg
             else if (key=="exp.tp_cursor_dist") settings::exploits::tp_cursor_dist=fval;
             } catch(...) {}
 
+            // theme
             try {
             if      (key=="theme.accent") parse_c4(settings::theme::accent);
             else if (key=="theme.bg_one") parse_c4(settings::theme::bg_one);
@@ -1662,17 +1988,21 @@ namespace cfg
             else if (key=="theme.text_inactive") parse_c4(settings::theme::text_inactive);
             } catch(...) {}
 
+            // menu
             try {
             if      (key=="ui.vsync") settings::menu::vsync=bv;
             else if (key=="ui.performance_mode") settings::menu::performance_mode=bv;
             else if (key=="ui.fps_limit") settings::menu::fps_limit=ival;
             } catch(...) {}
 
+            // settings
             try {
             if      (key=="app.hide_console") settings::settings::hide_console=bv;
             } catch(...) {}
         }
 
+        // The fill image lives on the device, not in the file, so a restored path
+        // has to be pushed to it again before the box fill can draw anything.
         if (sync::hooks().fill_image)
             settings::visuals::box_fill_image_loaded =
                 sync::hooks().fill_image(settings::visuals::box_fill_image_path,
@@ -2053,6 +2383,9 @@ namespace players_bridge
 
     static void set_target(unsigned long long instance)
     {
+        // The pin lives in its own store, so it outlives the aim features dropping
+        // their transient holds and needs no entity in the cache to be set. The
+        // aimbot picks it up on its next tick; no setting is touched here.
         targets::set((std::uint64_t)instance);
     }
 
@@ -2369,6 +2702,26 @@ static aether::bg::Config background_config()
     c.wind     = bg_wind;
     c.glow     = bg_glow;
     c.parallax = bg_parallax;
+
+    // The direction the falling elements fall.  The angle is the one the
+    // simulation and the streaks are both built from (`bg_dir` is the UI's
+    // preset, and writing a preset writes this), the spread is how far a single
+    // drop may lean off it, and the streak is how long a drop trails behind
+    // itself.
+    c.angle    = bg_angle;
+    c.streak   = bg_streak;
+    c.spread   = bg_spread;
+    c.width    = bg_width;
+
+    // The material the element is seen through.  The blur and the tint are the
+    // backdrop's own sliders and this file does not change them - it only hands
+    // their state to the element, so a heavy frost softens what drifts over it
+    // and a tinted capture does not get the light values meant for a clear one.
+    // With the backdrop off (or No Transparency on) both are zero and every
+    // element draws at the plain-plate values it always had.
+    const bool frosted = settings::backdrop::enabled && !no_transparency;
+    c.veil = frosted ? ImClamp(settings::backdrop::blur / 100.f, 0.f, 1.f) : 0.f;
+    c.tint = frosted ? ImClamp(settings::backdrop::tint / 100.f, 0.f, 1.f) : 0.f;
     return c;
 }
 
@@ -2412,7 +2765,7 @@ CGui::CGui()
     m_bSelectedCategory[ImCategory_Main] = true;
 }
 
-CGui::~CGui() {}
+CGui::~CGui() { surface::shutdown(); }
 
 bool CGui::Initialize(HWND hwnd, ID3D11Device* device, ID3D11DeviceContext* device_context)
 {
@@ -2421,6 +2774,12 @@ bool CGui::Initialize(HWND hwnd, ID3D11Device* device, ID3D11DeviceContext* devi
     m_hWnd           = hwnd;
     m_pDevice        = device;
     m_pDeviceContext = device_context;
+
+    // The interface's light and its contour maps, built once on the device.  A
+    // light is then one textured quad instead of a forty-triangle fan, and it
+    // has no polygon rim and no eight-bit rings to show.
+    if (!surface::init(device))
+        debug::warn("surface textures could not be built; the interface falls back to fan gradients");
 
     m_pTextures = new CTextures();
     m_pTextures->Initialize(device);
@@ -2556,6 +2915,15 @@ bool CGui::Initialize(HWND hwnd, ID3D11Device* device, ID3D11DeviceContext* devi
         std::lock_guard<std::mutex> lk(cache::mtx);
         out.players = (int)cache::cached_players.size();
         const cache::entity_t& me = cache::cached_local_player;
+
+        // "Loaded" is the stricter answer, and it is the one the waiting card
+        // needs.  A place id is readable the moment the client starts joining,
+        // while the client is still on its own loading screen - so `attached`
+        // is true for the whole of that wait, and a card gated on it never
+        // appeared at all.  Neither is the Player instance: it exists before
+        // the character does.  The body parts resolved under it are the first
+        // moment there is something to draw a game from.
+        out.loaded = out.attached && !me.parts.empty();
         out.local_user_id = (long long)me.user_id;
         snprintf(out.local_name, sizeof out.local_name, "%s",
             me.display_name.empty() ? me.name.c_str() : me.display_name.c_str());
@@ -2593,11 +2961,16 @@ bool CGui::Initialize(HWND hwnd, ID3D11Device* device, ID3D11DeviceContext* devi
 
     sync::hooks().aim_target_instance = +[]() -> unsigned long long
     {
+        // The pin first: it is what the players tab shows as held, and what the
+        // aim line and the aim-target colour follow while it is set.
         const unsigned long long pin = (unsigned long long)targets::get();
         if (pin) return pin;
 
         const unsigned long long ab = (unsigned long long)aimbot::player.instance.address;
         if (ab) return ab;
+        // No silent aim fallback. Its target flips as the cursor drifts, so the HUD
+        // and the aim line following it read as jitter on a lock the aimbot does not
+        // have; the silent aim keeps its own target dot and FOV circle.
         return 0ULL;
     };
 
@@ -2606,6 +2979,8 @@ bool CGui::Initialize(HWND hwnd, ID3D11Device* device, ID3D11DeviceContext* devi
         if (!path || !path[0])
             return false;
 
+        // Background removal re-keys the pixels, so the image has to be pushed to
+        // the device again for the toggle to take effect.
         boxfill::set_remove_bg(remove_bg);
         return boxfill::load_path(path);
     };
@@ -2688,7 +3063,11 @@ void CGui::Render(const char* title, POINTS size, bool* b_open)
 
     static bool s_key_last = false;
     bool s_key_cur = (GetAsyncKeyState(sync::state().menu_key) & 0x8000) != 0;
-    if (s_key_cur && !s_key_last && b_open && !io.WantCaptureKeyboard)
+    // The menu key is inert while the overlay's intro is on screen: the card is
+    // what the user sees, and a toggle during it would close a panel that has not
+    // opened yet.  Five seconds later the key is the menu's again.
+    if (s_key_cur && !s_key_last && b_open && !io.WantCaptureKeyboard &&
+        !sync::intro_hold())
         *b_open = !(*b_open);
     s_key_last = s_key_cur;
 
@@ -2697,12 +3076,19 @@ void CGui::Render(const char* title, POINTS size, bool* b_open)
         static bool  s_last_custom   = false;
         static float s_last_panel    = -1.f;
         static float s_last_dock     = -1.f;
+        static bool  s_last_opaque   = false;
+        static float s_last_spread   = -1.f;
         static float s_last_accent[4] = { -1.f, -1.f, -1.f, -1.f };
 
-        const float panel_a = ImClamp(settings::appearance::panel_alpha, 0.30f, 1.f);
-        const float dock_a  = ImClamp(settings::appearance::dock_alpha,  0.30f, 1.f);
+        // No Transparency is one switch over both alphas and the frost: the
+        // panel is drawn at full alpha in the theme's own dark fill, with no
+        // glass over it, which is what makes it a clean plate rather than a
+        // window with a solid tint.
+        const bool  opaque  = settings::appearance::no_transparency;
+        const float panel_a = opaque ? 1.f : ImClamp(settings::appearance::panel_alpha, 0.30f, 1.f);
+        const float dock_a  = opaque ? 1.f : ImClamp(settings::appearance::dock_alpha,  0.30f, 1.f);
 
-        aether::glass::frost = ImClamp(settings::appearance::glass_frost, 0.f, 1.f);
+        aether::glass::frost = opaque ? 0.f : ImClamp(settings::appearance::glass_sheen, 0.f, 1.f);
 
         const float* acc = settings::appearance::accent;
         const bool accent_moved =
@@ -2711,10 +3097,12 @@ void CGui::Render(const char* title, POINTS size, bool* b_open)
 
         if (s_last_rounding != settings::appearance::rounding ||
             s_last_custom   != settings::appearance::custom_accent ||
+            s_last_spread   != settings::appearance::accent_spread ||
             accent_moved)
         {
             s_last_rounding = settings::appearance::rounding;
             s_last_custom   = settings::appearance::custom_accent;
+            s_last_spread   = settings::appearance::accent_spread;
             for (int i = 0; i < 4; ++i)
                 s_last_accent[i] = settings::appearance::accent[i];
             apply_theme(settings::theme::index);
@@ -2724,10 +3112,11 @@ void CGui::Render(const char* title, POINTS size, bool* b_open)
             aether::glass::apply(style);
         }
 
-        if (s_last_panel != panel_a || s_last_dock != dock_a)
+        if (s_last_panel != panel_a || s_last_dock != dock_a || s_last_opaque != opaque)
         {
-            s_last_panel = panel_a;
-            s_last_dock  = dock_a;
+            s_last_panel  = panel_a;
+            s_last_dock   = dock_a;
+            s_last_opaque = opaque;
             aether::glass::window_alpha = panel_a;
             aether::glass::dock_alpha   = dock_a;
             aether::glass::apply(style);
@@ -2771,6 +3160,21 @@ void CGui::Render(const char* title, POINTS size, bool* b_open)
         const std::chrono::steady_clock::time_point menu_wall0 = gui_phase_at();
 
         sync::draw(io.DisplaySize);
+
+        // The panel's click, in one place rather than inside every widget.
+        //
+        // HoveredId is the item ImGui had under the cursor when the button went
+        // down, so this fires for controls and not for empty panel, and it does
+        // not need the widgets to know a sound exists.  The click is also the
+        // only event worth a sound: a hover that beeps turns the panel into a
+        // Geiger counter.
+        if (settings::misc_ui::click_sounds &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            ImGuiContext& g = *ImGui::GetCurrentContext();
+            if (g.HoveredId != 0)
+                ui_sound::play(ui_sound::kind::click, settings::misc_ui::click_volume);
+        }
 
         uifx::paint_controls();
         uifx::draw_overlay(ImGui::GetForegroundDrawList(), b_open && *b_open);

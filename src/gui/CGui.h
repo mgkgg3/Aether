@@ -17,7 +17,6 @@ enum ImCategories : int
 	ImCategory_Main,
 	ImCategory_Resources,
 	ImCategory_Executor,
-	ImCategory_Spotify,
 	ImCategory_Chat,
 	ImCategory_Settings,
 
